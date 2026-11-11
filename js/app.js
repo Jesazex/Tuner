@@ -1,0 +1,915 @@
+(function () {
+  var STORAGE_KEY = "struna.v1";
+  var PRESETS = [
+    { id: "standard", name: "Стандарт", notes: [64, 59, 55, 50, 45, 40], builtin: true },
+    { id: "drop-d", name: "Drop D", notes: [64, 59, 55, 50, 45, 38], builtin: true },
+    { id: "down-1", name: "На лад ниже", notes: [63, 58, 54, 49, 44, 39], builtin: true },
+    { id: "open-g", name: "Open G", notes: [62, 59, 55, 50, 43, 38], builtin: true },
+    { id: "open-d", name: "Open D", notes: [62, 57, 54, 50, 45, 38], builtin: true },
+    { id: "dadgad", name: "DADGAD", notes: [62, 57, 55, 50, 45, 38], builtin: true },
+  ];
+  var NATURALS = [[0, "C"], [2, "D"], [4, "E"], [5, "F"], [7, "G"], [9, "A"], [11, "B"]];
+  var ACCIDENTALS = [
+    [1, "C#", "1 / 3"],
+    [3, "D#", "2 / 4"],
+    [6, "F#", "4 / 6"],
+    [8, "G#", "5 / 7"],
+    [10, "A#", "6 / 8"],
+  ];
+
+  var state = loadState();
+  var draft = null;
+  var ctx = null;
+  var master = null;
+  var bufferCache = new Map();
+  var playing = [];
+  var micMode = "off";
+  var userWantsMic = false;
+  var micOn = false;
+  var micStream = null;
+  var micSource = null;
+  var analyser = null;
+  var micTimer = 0;
+  var audioWorker = null;
+  var workerBusy = false;
+  var workerSentAt = 0;
+  var live = null;
+  var hist = [];
+  var lastString = null;
+  var inTuneHold = false;
+  var silenceSince = 0;
+  var pluckedMidi = null;
+  var pluckUntil = 0;
+  var pluckTimer = 0;
+  var toastTimer = 0;
+  var dragging = false;
+  var lastIndex = -1;
+  var lastScrolled = null;
+
+  function uid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return String(Date.now()) + Math.random().toString(16).slice(2);
+  }
+
+  function esc(value) {
+    return String(value).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  function clonePreset(preset) {
+    return {
+      id: preset.id,
+      name: preset.name,
+      notes: preset.notes.slice(),
+      builtin: !!preset.builtin,
+    };
+  }
+
+  function defaultState() {
+    return {
+      tunings: PRESETS.map(clonePreset),
+      activeId: "standard",
+      showHz: false,
+    };
+  }
+
+  function sanitize(entry) {
+    if (!entry || typeof entry.name !== "string" || !Array.isArray(entry.notes) || entry.notes.length !== 6) {
+      return null;
+    }
+    var notes = entry.notes.map(Number);
+    var i;
+    for (i = 0; i < notes.length; i++) {
+      if (!Number.isInteger(notes[i]) || notes[i] < 0 || notes[i] > 127) return null;
+    }
+    var name = entry.name.trim().slice(0, 40);
+    if (!name) return null;
+    return { id: String(entry.id || uid()), name: name, notes: notes, builtin: !!entry.builtin };
+  }
+
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return defaultState();
+      var data = JSON.parse(raw);
+      var tunings = Array.isArray(data.tunings) ? data.tunings.map(sanitize).filter(Boolean) : [];
+      if (!tunings.length) return { tunings: [], activeId: null, showHz: !!data.showHz };
+      var activeId = tunings.some(function (t) { return t.id === data.activeId; }) ? data.activeId : tunings[0].id;
+      return { tunings: tunings, activeId: activeId, showHz: !!data.showHz };
+    } catch (error) {
+      return defaultState();
+    }
+  }
+
+  function persist() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        tunings: state.tunings,
+        activeId: state.activeId,
+        showHz: state.showHz,
+      }));
+    } catch (error) {}
+  }
+
+  function active() {
+    var i;
+    for (i = 0; i < state.tunings.length; i++) {
+      if (state.tunings[i].id === state.activeId) return state.tunings[i];
+    }
+    return null;
+  }
+
+  function resetDetection() {
+    hist = [];
+    lastString = null;
+    inTuneHold = false;
+    live = null;
+    silenceSince = 0;
+  }
+
+  function ensureCtx() {
+    if (!ctx) {
+      var AudioCtx = window.AudioContext || window.webkitAudioContext;
+      ctx = new AudioCtx({ latencyHint: "interactive" });
+      master = ctx.createGain();
+      var highpass = ctx.createBiquadFilter();
+      highpass.type = "highpass";
+      highpass.frequency.value = 30;
+      var comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -14;
+      comp.knee.value = 18;
+      comp.ratio.value = 2.5;
+      comp.attack.value = 0.005;
+      comp.release.value = 0.18;
+      master.connect(highpass);
+      highpass.connect(comp);
+      comp.connect(ctx.destination);
+    }
+    if (ctx.state === "suspended") ctx.resume();
+    return ctx;
+  }
+
+  function getBuffer(midi, frequency) {
+    var audio = ensureCtx();
+    var key = midi + "@" + audio.sampleRate;
+    if (!bufferCache.has(key)) {
+      var samples = renderPluckSamples(frequency, audio.sampleRate);
+      var buffer = audio.createBuffer(1, samples.length, audio.sampleRate);
+      buffer.getChannelData(0).set(samples);
+      bufferCache.set(key, buffer);
+      if (bufferCache.size > 40) bufferCache.delete(bufferCache.keys().next().value);
+    }
+    return bufferCache.get(key);
+  }
+
+  function releaseVoice(voice, seconds) {
+    if (!voice || voice.ending || !ctx) return;
+    voice.ending = true;
+    var time = ctx.currentTime;
+    var gain = voice.gain.gain;
+    gain.cancelScheduledValues(time);
+    var current = gain.value > 0.001 ? gain.value : 0.001;
+    gain.setValueAtTime(current, time);
+    gain.exponentialRampToValueAtTime(0.001, time + seconds);
+    voice.source.stop(time + seconds + 0.02);
+  }
+
+  function pluck(index) {
+    var tuning = active();
+    if (!tuning || index < 0 || index > 5) return;
+    var midi = tuning.notes[index];
+    var audio = ensureCtx();
+    var i;
+    for (i = 0; i < playing.length; i++) {
+      if (playing[i].midi === midi) releaseVoice(playing[i], 0.07);
+    }
+    var source = audio.createBufferSource();
+    source.buffer = getBuffer(midi, Music.frequency(midi));
+    var gain = audio.createGain();
+    gain.gain.value = 0.72;
+    source.connect(gain);
+    gain.connect(master);
+    source.start();
+    var voice = { midi: midi, source: source, gain: gain, ending: false };
+    playing.push(voice);
+    source.onended = function () {
+      var at = playing.indexOf(voice);
+      if (at >= 0) playing.splice(at, 1);
+    };
+    var alive = playing.filter(function (item) { return !item.ending; });
+    if (alive.length > 8) releaseVoice(alive[0], 0.09);
+
+    pluckedMidi = midi;
+    pluckUntil = performance.now() + 2800;
+    clearTimeout(pluckTimer);
+    pluckTimer = setTimeout(function () {
+      if (!live) paintLive();
+    }, 2850);
+    flashString(index);
+    if (!live) paintLive();
+    else paintNoteHighlight();
+    if (navigator.vibrate) navigator.vibrate(10);
+  }
+
+  function flashString(index) {
+    var wrap = document.querySelector('.string-col[data-index="' + index + '"] .s-line-wrap');
+    if (!wrap) return;
+    wrap.classList.remove("ring");
+    void wrap.offsetWidth;
+    wrap.classList.add("ring");
+  }
+
+  function haltMic(silent) {
+    micOn = false;
+    clearInterval(micTimer);
+    micTimer = 0;
+    if (micSource) {
+      try { micSource.disconnect(); } catch (error) {}
+    }
+    if (micStream) micStream.getTracks().forEach(function (track) { track.stop(); });
+    micSource = null;
+    micStream = null;
+    analyser = null;
+    if (!silent) onFrequency(null);
+  }
+
+  function setMicUi(mode) {
+    micMode = mode;
+    var button = document.getElementById("mic-btn");
+    button.classList.toggle("on", mode === "on");
+    button.textContent = mode === "on" ? "Слушаю" : "Микрофон";
+    paintLive();
+  }
+
+  function startMic() {
+    ensureCtx();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      userWantsMic = false;
+      setMicUi("unsupported");
+      return;
+    }
+    if (!window.isSecureContext) {
+      userWantsMic = false;
+      setMicUi("insecure");
+      return;
+    }
+    haltMic(true);
+    navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1,
+      },
+    }).then(function (stream) {
+      if (!userWantsMic) {
+        stream.getTracks().forEach(function (track) { track.stop(); });
+        return;
+      }
+      micStream = stream;
+      micSource = ctx.createMediaStreamSource(stream);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 4096;
+      analyser.smoothingTimeConstant = 0;
+      micSource.connect(analyser);
+      micOn = true;
+      setMicUi("on");
+      var buf = new Float32Array(analyser.fftSize);
+      if (!audioWorker) {
+        try {
+          audioWorker = new Worker("js/pitch-worker.js");
+          audioWorker.onmessage = function (event) {
+            workerBusy = false;
+            if (micOn) onFrequency(event.data ? event.data.freq : null);
+          };
+          audioWorker.onerror = function () {
+            audioWorker = null;
+            workerBusy = false;
+          };
+        } catch (error) {
+          audioWorker = null;
+        }
+      }
+      micTimer = setInterval(function () {
+        if (!micOn || !analyser) return;
+        analyser.getFloatTimeDomainData(buf);
+        if (audioWorker) {
+          if (workerBusy && performance.now() - workerSentAt > 500) workerBusy = false;
+          if (workerBusy) return;
+          var copy = new Float32Array(buf);
+          workerBusy = true;
+          workerSentAt = performance.now();
+          try {
+            audioWorker.postMessage({ samples: copy, sampleRate: ctx.sampleRate }, [copy.buffer]);
+          } catch (error) {
+            workerBusy = false;
+            onFrequency(detectPitch(buf, ctx.sampleRate));
+          }
+        } else {
+          onFrequency(detectPitch(buf, ctx.sampleRate));
+        }
+      }, 90);
+    }).catch(function () {
+      userWantsMic = false;
+      setMicUi("denied");
+    });
+  }
+
+  function toggleMic() {
+    if (userWantsMic) {
+      userWantsMic = false;
+      haltMic(false);
+      setMicUi("off");
+      return;
+    }
+    userWantsMic = true;
+    startMic();
+  }
+
+  function applyStable(freq) {
+    var tuning = active();
+    if (!tuning) return;
+    var index = Music.closestString(freq, tuning.notes, lastString);
+    lastString = index;
+    var target = tuning.notes[index];
+    var cents = Music.centsBetween(freq, Music.frequency(target));
+    var absCents = Math.abs(cents);
+    inTuneHold = inTuneHold ? absCents < 9 : absCents < 6;
+    var direction = inTuneHold ? "ok" : cents > 0 ? "down" : "up";
+    live = {
+      freq: freq,
+      index: index,
+      cents: cents,
+      target: target,
+      heard: Music.nearestMidi(freq),
+      direction: direction,
+    };
+    paintLive();
+  }
+
+  function onFrequency(freq) {
+    var now = performance.now();
+    if (freq == null) {
+      if (!silenceSince) silenceSince = now;
+      if (now - silenceSince > 320) {
+        live = null;
+        hist = [];
+        lastString = null;
+        inTuneHold = false;
+        silenceSince = 0;
+        paintLive();
+      }
+      return;
+    }
+    silenceSince = 0;
+    hist.push(freq);
+    if (hist.length > 3) hist.shift();
+    var sorted = hist.slice().sort(function (a, b) { return a - b; });
+    applyStable(sorted[sorted.length >> 1]);
+  }
+
+  function currentHighlight() {
+    if (live) return live.heard;
+    if (performance.now() < pluckUntil) return pluckedMidi;
+    return null;
+  }
+
+  function soundingFrequency() {
+    if (live) return live.freq;
+    if (performance.now() < pluckUntil && pluckedMidi != null) return Music.frequency(pluckedMidi);
+    return null;
+  }
+
+  function formatHz(freq) {
+    return freq.toFixed(1).replace(".", ",") + " Hz";
+  }
+
+  function paintHz() {
+    var el = document.getElementById("hero-hz");
+    var button = document.getElementById("hz-btn");
+    button.classList.toggle("on", state.showHz);
+    button.setAttribute("aria-pressed", state.showHz ? "true" : "false");
+    if (!state.showHz) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    var freq = soundingFrequency();
+    el.textContent = freq == null ? "нет звука" : formatHz(freq);
+  }
+
+  function paintHero() {
+    var kicker = document.getElementById("hero-kicker");
+    var note = document.getElementById("hero-note");
+    var heard = document.getElementById("hero-heard");
+    var dir = document.getElementById("hero-dir");
+    var cents = document.getElementById("hero-cents");
+    var meter = document.getElementById("meter");
+    var needle = document.getElementById("needle");
+    var tuning = active();
+
+    if (!tuning) {
+      kicker.textContent = "Нет строя";
+      kicker.classList.remove("pulse");
+      note.textContent = "—";
+      note.className = "hero-note";
+      heard.hidden = true;
+      dir.textContent = "Создайте строй, чтобы настроить гитару";
+      dir.className = "dir idle";
+      dir.dataset.key = "";
+      cents.hidden = true;
+      meter.hidden = true;
+      return;
+    }
+
+    if (live) {
+      kicker.textContent = "Струна " + (live.index + 1);
+      kicker.classList.remove("pulse");
+      note.textContent = Music.midiToName(live.target);
+      note.className = "hero-note dir-" + live.direction;
+      if (live.heard != null && live.heard !== live.target) {
+        heard.hidden = false;
+        heard.textContent = "слышится " + Music.midiToName(live.heard);
+      } else {
+        heard.hidden = true;
+      }
+      var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять струну" : "Опустить струну";
+      var arrow = live.direction === "ok" ? "" : live.direction === "up" ? "↑ " : "↓ ";
+      var key = live.index + ":" + live.direction;
+      if (dir.dataset.key !== key) {
+        dir.dataset.key = key;
+        dir.textContent = arrow + phrase;
+        document.getElementById("live-region").textContent =
+          "Струна " + (live.index + 1) + ", " + Music.midiToName(live.target) + ". " + phrase;
+      }
+      dir.className = "dir dir-" + live.direction;
+      var rounded = Math.round(live.cents);
+      var sign = rounded > 0 ? "+" : rounded < 0 ? "\u2212" : "";
+      cents.hidden = false;
+      cents.textContent = sign + Math.abs(rounded) + " цент.";
+      meter.hidden = false;
+      var clamped = Math.max(-50, Math.min(50, live.cents));
+      needle.style.left = (50 + clamped) + "%";
+      needle.className = "needle dir-" + live.direction;
+      return;
+    }
+
+    meter.hidden = true;
+    cents.hidden = true;
+    heard.hidden = true;
+    note.textContent = "";
+    note.className = "hero-note";
+    dir.dataset.key = "";
+    if (micMode === "on") {
+      kicker.textContent = "Слушаю";
+      kicker.classList.add("pulse");
+      dir.textContent = "Сыграйте открытую струну";
+    } else if (micMode === "denied") {
+      kicker.textContent = "Нет доступа";
+      kicker.classList.remove("pulse");
+      dir.textContent = "Разрешите микрофон в настройках браузера";
+    } else if (micMode === "insecure") {
+      kicker.textContent = "Микрофон";
+      kicker.classList.remove("pulse");
+      dir.textContent = "Нужен https. На GitHub Pages он будет.";
+    } else if (micMode === "unsupported") {
+      kicker.textContent = "Микрофон";
+      kicker.classList.remove("pulse");
+      dir.textContent = "Этот браузер не отдаёт микрофон";
+    } else {
+      kicker.textContent = "Микрофон выключен";
+      kicker.classList.remove("pulse");
+      dir.textContent = "Включите его или проведите по струнам";
+    }
+    dir.className = "dir idle";
+  }
+
+  function paintNoteTags() {
+    var tuning = active();
+    var map = new Map();
+    if (tuning) {
+      tuning.notes.forEach(function (midi, index) {
+        var list = map.get(midi) || [];
+        list.push(index + 1);
+        map.set(midi, list);
+      });
+    }
+    document.querySelectorAll(".note-row").forEach(function (row) {
+      var tags = map.get(Number(row.dataset.midi));
+      row.querySelector(".ntag").textContent = tags ? "струна " + tags.join(", ") : "";
+    });
+  }
+
+  function paintNoteHighlight() {
+    var layer = document.getElementById("notes-layer");
+    if (layer.hidden) return;
+    var midi = currentHighlight();
+    var current = null;
+    document.querySelectorAll(".note-row").forEach(function (row) {
+      var on = midi != null && Number(row.dataset.midi) === midi;
+      row.classList.toggle("on", on);
+      if (on) current = row;
+    });
+    if (!current) {
+      lastScrolled = null;
+      return;
+    }
+    if (String(midi) === lastScrolled) return;
+    var list = document.getElementById("note-list");
+    var listRect = list.getBoundingClientRect();
+    var rowRect = current.getBoundingClientRect();
+    if (rowRect.top < listRect.top || rowRect.bottom > listRect.bottom) {
+      var top = current.offsetTop - list.clientHeight / 2 + current.clientHeight / 2;
+      list.scrollTo({ top: top, behavior: "smooth" });
+    }
+    lastScrolled = String(midi);
+  }
+
+  function paintLive() {
+    document.querySelectorAll(".string-col").forEach(function (col) {
+      var index = Number(col.dataset.index);
+      var sounding = !!(live && live.index === index);
+      col.classList.toggle("sounding", sounding);
+      col.classList.toggle("intune", sounding && live.direction === "ok");
+    });
+    paintHero();
+    paintHz();
+    paintNoteHighlight();
+  }
+
+  function renderBoard() {
+    var tuning = active();
+    var root = document.getElementById("strings");
+    if (!tuning) {
+      root.innerHTML = "";
+      return;
+    }
+    root.innerHTML = tuning.notes.map(function (midi, index) {
+      var delta = midi - Music.STANDARD[index];
+      var cls = delta > 0 ? "plus" : delta < 0 ? "minus" : "zero";
+      return '<div class="string-col" data-index="' + index + '">' +
+        '<div class="s-meta"><span class="s-num">' + (index + 1) + "</span>" +
+        '<span class="s-note">' + Music.midiToName(midi) + "</span>" +
+        '<span class="s-off ' + cls + '">' + Music.formatOffset(delta) + "</span></div>" +
+        '<div class="s-line-wrap"><div class="s-line"></div></div></div>';
+    }).join("");
+  }
+
+  function canShift(step) {
+    var tuning = active();
+    if (!tuning) return false;
+    return tuning.notes.every(function (midi) {
+      var next = midi + step;
+      return next >= Music.MIN_MIDI && next <= Music.MAX_MIDI;
+    });
+  }
+
+  function syncTuner() {
+    var tuning = active();
+    document.getElementById("tuning-name").textContent = tuning ? tuning.name : "Нет строя";
+    document.getElementById("empty-state").hidden = !!tuning;
+    document.getElementById("board").hidden = !tuning;
+    document.getElementById("legend").hidden = !tuning;
+    document.getElementById("fret-down").disabled = !canShift(-1);
+    document.getElementById("fret-up").disabled = !canShift(1);
+    if (tuning) renderBoard();
+    paintNoteTags();
+    paintLive();
+  }
+
+  function transpose(step) {
+    var tuning = active();
+    if (!tuning || !canShift(step)) return;
+    tuning.notes = tuning.notes.map(function (midi) { return midi + step; });
+    persist();
+    bufferCache.clear();
+    var stable = hist.length ? hist.slice().sort(function (a, b) { return a - b; })[hist.length >> 1] : null;
+    lastString = null;
+    inTuneHold = false;
+    syncTuner();
+    if (stable) applyStable(stable);
+    toast(step > 0 ? "Строй поднят на лад" : "Строй опущен на лад");
+  }
+
+  function toast(message) {
+    var el = document.getElementById("toast");
+    el.textContent = message;
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.hidden = true; }, 1600);
+  }
+
+  function renderLibrary() {
+    var root = document.getElementById("library-list");
+    if (!state.tunings.length) {
+      root.innerHTML = '<div class="empty"><p>Пока нет строёв</p><p class="hint">Создайте строй, чтобы настроить гитару или услышать его.</p></div>';
+      return;
+    }
+    root.innerHTML = state.tunings.map(function (tuning) {
+      var notes = tuning.notes.map(Music.midiToName).join("  ");
+      var offsets = tuning.notes.map(function (midi, index) {
+        return Music.formatOffset(midi - Music.STANDARD[index]);
+      }).join("  ");
+      var selected = tuning.id === state.activeId ? " selected" : "";
+      return '<article class="tune-card' + selected + '">' +
+        '<button type="button" class="tune-open" data-open="' + esc(tuning.id) + '" aria-label="Открыть строй ' + esc(tuning.name) + '">' +
+        '<span class="tune-name">' + esc(tuning.name) + "</span>" +
+        '<span class="tune-notes">' + notes + "</span>" +
+        '<span class="tune-offs">' + offsets + "</span></button>" +
+        '<div class="tune-actions">' +
+        '<button type="button" data-edit="' + esc(tuning.id) + '">Изменить</button>' +
+        '<button type="button" class="danger" data-del="' + esc(tuning.id) + '">Удалить</button>' +
+        "</div></article>";
+    }).join("");
+  }
+
+  function scaleHtml() {
+    var acc = ACCIDENTALS.map(function (item) {
+      return '<button type="button" class="key acc" data-pc="' + item[0] + '" style="grid-column:' + (item[0] + 1) + '">' + item[1] + "</button>";
+    }).join("");
+    var nat = NATURALS.map(function (item) {
+      return '<button type="button" class="key nat" data-pc="' + item[0] + '" style="grid-column:' + (item[0] + 1) + '">' + item[1] + "</button>";
+    }).join("");
+    return '<div class="scale"><div class="scale-grid">' + acc + nat + "</div></div>";
+  }
+
+  function refreshString(index) {
+    var card = document.getElementById("string-card-" + index);
+    var midi = draft.notes[index];
+    var pc = Music.pitchClass(midi);
+    var delta = midi - Music.STANDARD[index];
+    card.querySelector(".big-note").textContent = Music.midiToName(midi);
+    var off = card.querySelector(".off");
+    off.textContent = Music.formatOffset(delta);
+    off.className = "off " + (delta > 0 ? "plus" : delta < 0 ? "minus" : "zero");
+    card.querySelector(".oct-label").textContent = "октава " + Music.octaveOf(midi);
+    card.querySelectorAll(".key").forEach(function (button) {
+      button.classList.toggle("selected", Number(button.dataset.pc) === pc);
+    });
+    card.querySelector('[data-act="semi-down"]').disabled = midi - 1 < Music.MIN_MIDI;
+    card.querySelector('[data-act="semi-up"]').disabled = midi + 1 > Music.MAX_MIDI;
+    var octave = Music.octaveOf(midi);
+    card.querySelector('[data-act="oct-down"]').disabled = Music.midiFrom(pc, octave - 1) < Music.MIN_MIDI;
+    card.querySelector('[data-act="oct-up"]').disabled = Music.midiFrom(pc, octave + 1) > Music.MAX_MIDI;
+  }
+
+  function renderEditor() {
+    document.getElementById("editor-name").value = draft.name;
+    document.getElementById("editor-name").classList.remove("invalid");
+    document.getElementById("editor-body").innerHTML = draft.notes.map(function (midi, index) {
+      return '<article class="string-card" id="string-card-' + index + '" data-index="' + index + '">' +
+        "<header><span class=\"label\">Струна " + (index + 1) + "</span>" +
+        '<strong class="big-note"></strong><span class="off"></span></header>' +
+        '<div class="stepper">' +
+        '<button type="button" data-act="semi-down" aria-label="На полтона ниже">−</button>' +
+        '<span class="oct-label"></span>' +
+        '<button type="button" data-act="oct-down" aria-label="Октавой ниже">− окт</button>' +
+        '<button type="button" data-act="oct-up" aria-label="Октавой выше">+ окт</button>' +
+        '<button type="button" data-act="semi-up" aria-label="На полтона выше">+</button>' +
+        "</div>" + scaleHtml() + "</article>";
+    }).join("");
+    draft.notes.forEach(function (_, index) { refreshString(index); });
+    if (!draft.name) {
+      setTimeout(function () { document.getElementById("editor-name").focus(); }, 40);
+    }
+  }
+
+  function saveDraft() {
+    var input = document.getElementById("editor-name");
+    var name = input.value.trim();
+    if (!name) {
+      input.classList.add("invalid");
+      input.focus();
+      return;
+    }
+    var notes = draft.notes.slice();
+    var id = draft.id;
+    if (!id) {
+      id = uid();
+      state.tunings = state.tunings.concat([{ id: id, name: name, notes: notes, builtin: false }]);
+    } else {
+      state.tunings = state.tunings.map(function (tuning) {
+        if (tuning.id !== id) return tuning;
+        return { id: id, name: name, notes: notes, builtin: false };
+      });
+    }
+    state.activeId = id;
+    persist();
+    resetDetection();
+    bufferCache.clear();
+    location.hash = "tuner";
+  }
+
+  function askDelete(id) {
+    var tuning = state.tunings.find(function (item) { return item.id === id; });
+    if (!tuning) return;
+    document.getElementById("dialog-body").textContent = "«" + tuning.name + "» исчезнет из списка.";
+    document.getElementById("dialog").hidden = false;
+    document.getElementById("dialog-ok").onclick = function () {
+      state.tunings = state.tunings.filter(function (item) { return item.id !== id; });
+      if (state.activeId === id) state.activeId = state.tunings.length ? state.tunings[0].id : null;
+      persist();
+      document.getElementById("dialog").hidden = true;
+      renderLibrary();
+    };
+  }
+
+  function showView(name) {
+    document.getElementById("view-tuner").hidden = name !== "tuner";
+    document.getElementById("view-library").hidden = name !== "library";
+    document.getElementById("view-editor").hidden = name !== "editor";
+  }
+
+  function parseRoute() {
+    var hash = location.hash.replace(/^#/, "");
+    if (hash.indexOf("edit/") === 0) return { name: "edit", id: decodeURIComponent(hash.slice(5)) };
+    if (hash === "library") return { name: "library" };
+    return { name: "tuner" };
+  }
+
+  function openEditor(id) {
+    if (id === "new") {
+      var base = active();
+      draft = {
+        id: null,
+        name: "",
+        notes: base ? base.notes.slice() : Music.STANDARD.slice(),
+      };
+    } else {
+      var tuning = state.tunings.find(function (item) { return item.id === id; });
+      if (!tuning) {
+        location.hash = "library";
+        return;
+      }
+      draft = { id: tuning.id, name: tuning.name, notes: tuning.notes.slice() };
+    }
+    renderEditor();
+    showView("editor");
+  }
+
+  function closeNotes() {
+    document.getElementById("notes-layer").hidden = true;
+    lastScrolled = null;
+  }
+
+  function openNotes() {
+    paintNoteTags();
+    document.getElementById("notes-layer").hidden = false;
+    lastScrolled = null;
+    paintNoteHighlight();
+  }
+
+  function renderRoute() {
+    closeNotes();
+    var route = parseRoute();
+    if (route.name === "library") {
+      renderLibrary();
+      showView("library");
+    } else if (route.name === "edit") {
+      openEditor(route.id);
+    } else {
+      showView("tuner");
+      syncTuner();
+    }
+  }
+
+  function indexFromPointer(event) {
+    var rect = document.getElementById("board").getBoundingClientRect();
+    var x = Math.min(Math.max(event.clientX - rect.left, 0), Math.max(rect.width - 0.01, 0));
+    return Math.min(5, Math.max(0, Math.floor((x / rect.width) * 6)));
+  }
+
+  function buildNoteList() {
+    document.getElementById("note-list").innerHTML = Music.catalog().map(function (midi) {
+      var cls = Music.pitchClass(midi) === 0 ? "note-row octave-start" : "note-row";
+      return '<div class="' + cls + '" data-midi="' + midi + '" role="listitem">' +
+        '<span class="nn">' + Music.midiToName(midi) + '</span><span class="ntag"></span></div>';
+    }).join("");
+  }
+
+  function init() {
+    buildNoteList();
+    document.getElementById("library-btn").addEventListener("click", function () { location.hash = "library"; });
+    document.getElementById("tuning-name").addEventListener("click", function () { location.hash = "library"; });
+    document.getElementById("notes-btn").addEventListener("click", openNotes);
+    document.getElementById("notes-close").addEventListener("click", closeNotes);
+    document.getElementById("notes-layer").addEventListener("click", function (event) {
+      if (event.target.id === "notes-layer") closeNotes();
+    });
+    document.getElementById("hz-btn").addEventListener("click", function () {
+      state.showHz = !state.showHz;
+      persist();
+      paintHz();
+    });
+    document.getElementById("mic-btn").addEventListener("click", toggleMic);
+    document.getElementById("fret-down").addEventListener("click", function () { transpose(-1); });
+    document.getElementById("fret-up").addEventListener("click", function () { transpose(1); });
+    document.getElementById("empty-create").addEventListener("click", function () { location.hash = "edit/new"; });
+    document.getElementById("library-back").addEventListener("click", function () { location.hash = "tuner"; });
+    document.getElementById("new-tuning").addEventListener("click", function () { location.hash = "edit/new"; });
+    document.getElementById("editor-back").addEventListener("click", function () { location.hash = "library"; });
+    document.getElementById("save-tuning").addEventListener("click", saveDraft);
+    document.getElementById("dialog-cancel").addEventListener("click", function () {
+      document.getElementById("dialog").hidden = true;
+    });
+    document.getElementById("dialog").addEventListener("click", function (event) {
+      if (event.target.id === "dialog") document.getElementById("dialog").hidden = true;
+    });
+    document.getElementById("editor-name").addEventListener("input", function (event) {
+      event.target.classList.remove("invalid");
+    });
+    document.getElementById("editor-body").addEventListener("click", function (event) {
+      var card = event.target.closest(".string-card");
+      if (!card || !draft) return;
+      var index = Number(card.dataset.index);
+      var key = event.target.closest("[data-pc]");
+      var midi = draft.notes[index];
+      var pc = Music.pitchClass(midi);
+      var octave = Music.octaveOf(midi);
+      var next = midi;
+      if (key) {
+        next = Music.midiFrom(Number(key.dataset.pc), octave);
+      } else {
+        var act = event.target.closest("[data-act]");
+        if (!act) return;
+        if (act.dataset.act === "semi-down") next = midi - 1;
+        if (act.dataset.act === "semi-up") next = midi + 1;
+        if (act.dataset.act === "oct-down") next = Music.midiFrom(pc, octave - 1);
+        if (act.dataset.act === "oct-up") next = Music.midiFrom(pc, octave + 1);
+      }
+      if (next >= Music.MIN_MIDI && next <= Music.MAX_MIDI) draft.notes[index] = next;
+      refreshString(index);
+    });
+    document.getElementById("library-list").addEventListener("click", function (event) {
+      var edit = event.target.closest("[data-edit]");
+      if (edit) {
+        location.hash = "edit/" + encodeURIComponent(edit.dataset.edit);
+        return;
+      }
+      var del = event.target.closest("[data-del]");
+      if (del) {
+        askDelete(del.dataset.del);
+        return;
+      }
+      var open = event.target.closest("[data-open]");
+      if (!open) return;
+      state.activeId = open.dataset.open;
+      persist();
+      resetDetection();
+      location.hash = "tuner";
+    });
+
+    var board = document.getElementById("board");
+    board.addEventListener("pointerdown", function (event) {
+      if (board.hidden || !active()) return;
+      dragging = true;
+      board.setPointerCapture(event.pointerId);
+      lastIndex = indexFromPointer(event);
+      pluck(lastIndex);
+    });
+    board.addEventListener("pointermove", function (event) {
+      if (!dragging) return;
+      var index = indexFromPointer(event);
+      if (index !== lastIndex) {
+        lastIndex = index;
+        pluck(index);
+      }
+    });
+    function endDrag() { dragging = false; lastIndex = -1; }
+    board.addEventListener("pointerup", endDrag);
+    board.addEventListener("pointercancel", endDrag);
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        if (!document.getElementById("dialog").hidden) {
+          document.getElementById("dialog").hidden = true;
+          return;
+        }
+        if (!document.getElementById("notes-layer").hidden) closeNotes();
+        return;
+      }
+      if (event.repeat) return;
+      if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA")) return;
+      if (parseRoute().name !== "tuner") return;
+      if (event.key >= "1" && event.key <= "6") pluck(Number(event.key) - 1);
+    });
+
+    document.addEventListener("visibilitychange", function () {
+      if (!ctx || !master) return;
+      var time = ctx.currentTime;
+      if (document.hidden) {
+        master.gain.setTargetAtTime(0.0001, time, 0.03);
+        if (micOn) haltMic(true);
+      } else {
+        master.gain.setTargetAtTime(1, time, 0.03);
+        if (userWantsMic) startMic();
+      }
+    });
+
+    window.addEventListener("hashchange", renderRoute);
+    renderRoute();
+  }
+
+  init();
+})();

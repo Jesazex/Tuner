@@ -12,7 +12,9 @@
       return new Float32Array(1);
     }
 
-    var duration = Math.min(3.6, Math.max(1.8, 3.6 - frequency / 220));
+    var duration = 8.6 - frequency / 70;
+    if (duration > 8.2) duration = 8.2;
+    if (duration < 5) duration = 5;
     var length = Math.floor(sampleRate * duration);
     var out = new Float32Array(length);
 
@@ -26,7 +28,7 @@
     var i;
     for (i = 0; i < size; i++) {
       var white = Math.random() * 2 - 1;
-      prev = prev * 0.5 + white * 0.5;
+      prev = prev * 0.68 + white * 0.32;
       noise[i] = prev;
     }
     var pick = Math.round((sampleRate / frequency) * 0.12);
@@ -44,10 +46,10 @@
     for (i = 0; i < size; i++) buf[i] *= scale;
 
     // Gain is applied once per trip around the delay, not once per sample.
-    var loopGain = Math.pow(0.004, period / (sampleRate * duration));
+    var loopGain = Math.pow(0.02, period / (sampleRate * duration));
     var write = 0;
     var last = 0;
-    var attackSamples = Math.max(8, Math.round(sampleRate * 0.002));
+    var attackSamples = Math.max(8, Math.round(sampleRate * 0.014));
     var n;
     for (n = 0; n < length; n++) {
       var read = wrap(write - period, size);
@@ -61,7 +63,7 @@
       buf[write] = filtered * loopGain;
       write++;
       if (write >= size) write = 0;
-      var attack = n < attackSamples ? n / attackSamples : 1;
+      var attack = n < attackSamples ? 0.5 - 0.5 * Math.cos(Math.PI * n / attackSamples) : 1;
       out[n] = delayed * attack;
     }
 
@@ -75,9 +77,10 @@
     if (makeup < 0.6) makeup = 0.6;
     for (i = 0; i < length; i++) out[i] *= makeup;
 
-    var fade = Math.max(1, Math.round(sampleRate * 0.02));
+    var fade = Math.max(1, Math.round(sampleRate * 0.5));
     for (i = 0; i < fade && i < length; i++) {
-      out[length - 1 - i] *= i / fade;
+      var env = 0.5 - 0.5 * Math.cos(Math.PI * i / fade);
+      out[length - 1 - i] *= env;
     }
     return out;
   }

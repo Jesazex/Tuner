@@ -23,9 +23,10 @@
   var master = null;
   var bufferCache = new Map();
   var playing = [];
-  var micMode = "off";
-  var userWantsMic = false;
   var micOn = false;
+  var micStarting = false;
+  var micBlocked = false;
+  var audioPrimed = false;
   var micStream = null;
   var micSource = null;
   var analyser = null;
@@ -131,7 +132,11 @@
   function ensureCtx() {
     if (!ctx) {
       var AudioCtx = window.AudioContext || window.webkitAudioContext;
-      ctx = new AudioCtx({ latencyHint: "interactive" });
+      try {
+        ctx = new AudioCtx({ latencyHint: "interactive" });
+      } catch (error) {
+        ctx = new AudioCtx();
+      }
       master = ctx.createGain();
       var highpass = ctx.createBiquadFilter();
       highpass.type = "highpass";
@@ -182,7 +187,7 @@
     var audio = ensureCtx();
     var i;
     for (i = 0; i < playing.length; i++) {
-      if (playing[i].midi === midi) releaseVoice(playing[i], 0.07);
+      if (playing[i].midi === midi) releaseVoice(playing[i], 0.16);
     }
     var source = audio.createBufferSource();
     source.buffer = getBuffer(midi, Music.frequency(midi));
@@ -201,11 +206,11 @@
     if (alive.length > 8) releaseVoice(alive[0], 0.09);
 
     pluckedMidi = midi;
-    pluckUntil = performance.now() + 2800;
+    pluckUntil = performance.now() + 5600;
     clearTimeout(pluckTimer);
     pluckTimer = setTimeout(function () {
       if (!live) paintLive();
-    }, 2850);
+    }, 5650);
     flashString(index);
     if (!live) paintLive();
     else paintNoteHighlight();
@@ -234,27 +239,20 @@
     if (!silent) onFrequency(null);
   }
 
-  function setMicUi(mode) {
-    micMode = mode;
-    var button = document.getElementById("mic-btn");
-    button.classList.toggle("on", mode === "on");
-    button.textContent = mode === "on" ? "Слушаю" : "Микрофон";
-    paintLive();
-  }
-
   function startMic() {
+    if (micOn || micStarting || micBlocked) return;
     ensureCtx();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      userWantsMic = false;
-      setMicUi("unsupported");
+      micBlocked = true;
+      toast("Этот браузер не отдаёт микрофон");
       return;
     }
     if (!window.isSecureContext) {
-      userWantsMic = false;
-      setMicUi("insecure");
+      micBlocked = true;
+      toast("Микрофон доступен только по https");
       return;
     }
-    haltMic(true);
+    micStarting = true;
     navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
@@ -263,7 +261,9 @@
         channelCount: 1,
       },
     }).then(function (stream) {
-      if (!userWantsMic) {
+      micStarting = false;
+      audioPrimed = true;
+      if (document.hidden) {
         stream.getTracks().forEach(function (track) { track.stop(); });
         return;
       }
@@ -274,7 +274,7 @@
       analyser.smoothingTimeConstant = 0;
       micSource.connect(analyser);
       micOn = true;
-      setMicUi("on");
+      paintLive();
       var buf = new Float32Array(analyser.fftSize);
       if (!audioWorker) {
         try {
@@ -310,20 +310,28 @@
           onFrequency(detectPitch(buf, ctx.sampleRate));
         }
       }, 90);
-    }).catch(function () {
-      userWantsMic = false;
-      setMicUi("denied");
+    }).catch(function (error) {
+      micStarting = false;
+      var name = error && error.name;
+      if ((name === "NotAllowedError" || name === "PermissionDeniedError") && !audioPrimed) return;
+      micBlocked = true;
+      toast(name === "NotFoundError" ? "Микрофон не найден" : "Разрешите микрофон в настройках браузера");
     });
   }
 
-  function toggleMic() {
-    if (userWantsMic) {
-      userWantsMic = false;
-      haltMic(false);
-      setMicUi("off");
-      return;
+  function primeAudio() {
+    ensureCtx();
+    if (!audioPrimed) {
+      audioPrimed = true;
+      try {
+        var silence = ctx.createBuffer(1, 1, ctx.sampleRate);
+        var blip = ctx.createBufferSource();
+        blip.buffer = silence;
+        blip.connect(master);
+        blip.start();
+      } catch (error) {}
     }
-    userWantsMic = true;
+    if (ctx.state === "suspended") ctx.resume();
     startMic();
   }
 
@@ -400,104 +408,60 @@
   }
 
   function paintHero() {
-    var kicker = document.getElementById("hero-kicker");
+    var hero = document.getElementById("hero");
     var note = document.getElementById("hero-note");
     var heard = document.getElementById("hero-heard");
     var dir = document.getElementById("hero-dir");
     var cents = document.getElementById("hero-cents");
     var meter = document.getElementById("meter");
     var needle = document.getElementById("needle");
-    var tuning = active();
 
-    if (!tuning) {
-      kicker.textContent = "Нет строя";
-      kicker.classList.remove("pulse");
-      note.textContent = "—";
+    if (!live) {
+      note.textContent = "";
       note.className = "hero-note";
       heard.hidden = true;
-      dir.textContent = "Создайте строй, чтобы настроить гитару";
-      dir.className = "dir idle";
+      dir.textContent = "";
+      dir.className = "dir";
       dir.dataset.key = "";
       cents.hidden = true;
       meter.hidden = true;
+      hero.hidden = !state.showHz;
       return;
     }
 
-    if (live) {
-      kicker.textContent = "Струна " + (live.index + 1);
-      kicker.classList.remove("pulse");
-      note.textContent = Music.midiToName(live.target);
-      note.className = "hero-note dir-" + live.direction;
-      if (live.heard != null && live.heard !== live.target) {
-        heard.hidden = false;
-        heard.textContent = "слышится " + Music.midiToName(live.heard);
-      } else {
-        heard.hidden = true;
-      }
-      var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять струну" : "Опустить струну";
-      var arrow = live.direction === "ok" ? "" : live.direction === "up" ? "↑ " : "↓ ";
-      var key = live.index + ":" + live.direction;
-      if (dir.dataset.key !== key) {
-        dir.dataset.key = key;
-        dir.textContent = arrow + phrase;
-        document.getElementById("live-region").textContent =
-          "Струна " + (live.index + 1) + ", " + Music.midiToName(live.target) + ". " + phrase;
-      }
-      dir.className = "dir dir-" + live.direction;
-      var rounded = Math.round(live.cents);
-      var sign = rounded > 0 ? "+" : rounded < 0 ? "\u2212" : "";
-      cents.hidden = false;
-      cents.textContent = sign + Math.abs(rounded) + " цент.";
-      meter.hidden = false;
-      var clamped = Math.max(-50, Math.min(50, live.cents));
-      needle.style.left = (50 + clamped) + "%";
-      needle.className = "needle dir-" + live.direction;
-      return;
-    }
-
-    meter.hidden = true;
-    cents.hidden = true;
-    heard.hidden = true;
-    note.textContent = "";
-    note.className = "hero-note";
-    dir.dataset.key = "";
-    if (micMode === "on") {
-      kicker.textContent = "Слушаю";
-      kicker.classList.add("pulse");
-      dir.textContent = "Сыграйте открытую струну";
-    } else if (micMode === "denied") {
-      kicker.textContent = "Нет доступа";
-      kicker.classList.remove("pulse");
-      dir.textContent = "Разрешите микрофон в настройках браузера";
-    } else if (micMode === "insecure") {
-      kicker.textContent = "Микрофон";
-      kicker.classList.remove("pulse");
-      dir.textContent = "Нужен https. На GitHub Pages он будет.";
-    } else if (micMode === "unsupported") {
-      kicker.textContent = "Микрофон";
-      kicker.classList.remove("pulse");
-      dir.textContent = "Этот браузер не отдаёт микрофон";
+    hero.hidden = false;
+    note.textContent = Music.midiToName(live.target);
+    note.className = "hero-note dir-" + live.direction;
+    if (live.heard != null && live.heard !== live.target) {
+      heard.hidden = false;
+      heard.textContent = "слышится " + Music.midiToName(live.heard);
     } else {
-      kicker.textContent = "Микрофон выключен";
-      kicker.classList.remove("pulse");
-      dir.textContent = "Включите его или проведите по струнам";
+      heard.hidden = true;
     }
-    dir.className = "dir idle";
+    var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять струну" : "Опустить струну";
+    var arrow = live.direction === "ok" ? "" : live.direction === "up" ? "↑ " : "↓ ";
+    var key = live.index + ":" + live.direction;
+    if (dir.dataset.key !== key) {
+      dir.dataset.key = key;
+      dir.textContent = arrow + phrase;
+      document.getElementById("live-region").textContent = Music.midiToName(live.target) + ". " + phrase;
+    }
+    dir.className = "dir dir-" + live.direction;
+    var rounded = Math.round(live.cents);
+    var sign = rounded > 0 ? "+" : rounded < 0 ? "\u2212" : "";
+    cents.hidden = false;
+    cents.textContent = sign + Math.abs(rounded) + " цент.";
+    meter.hidden = false;
+    var clamped = Math.max(-50, Math.min(50, live.cents));
+    needle.style.left = (50 + clamped) + "%";
+    needle.className = "needle dir-" + live.direction;
   }
 
   function paintNoteTags() {
     var tuning = active();
-    var map = new Map();
-    if (tuning) {
-      tuning.notes.forEach(function (midi, index) {
-        var list = map.get(midi) || [];
-        list.push(index + 1);
-        map.set(midi, list);
-      });
-    }
+    var used = new Set(tuning ? tuning.notes : []);
     document.querySelectorAll(".note-row").forEach(function (row) {
-      var tags = map.get(Number(row.dataset.midi));
-      row.querySelector(".ntag").textContent = tags ? "струна " + tags.join(", ") : "";
+      row.querySelector(".ntag").textContent = used.has(Number(row.dataset.midi)) ? "в строе" : "";
     });
   }
 
@@ -549,7 +513,7 @@
       var delta = midi - Music.STANDARD[index];
       var cls = delta > 0 ? "plus" : delta < 0 ? "minus" : "zero";
       return '<div class="string-col" data-index="' + index + '">' +
-        '<div class="s-meta"><span class="s-num">' + (index + 1) + "</span>" +
+        '<div class="s-meta">' +
         '<span class="s-note">' + Music.midiToName(midi) + "</span>" +
         '<span class="s-off ' + cls + '">' + Music.formatOffset(delta) + "</span></div>" +
         '<div class="s-line-wrap"><div class="s-line"></div></div></div>';
@@ -659,8 +623,7 @@
     document.getElementById("editor-name").classList.remove("invalid");
     document.getElementById("editor-body").innerHTML = draft.notes.map(function (midi, index) {
       return '<article class="string-card" id="string-card-' + index + '" data-index="' + index + '">' +
-        "<header><span class=\"label\">Струна " + (index + 1) + "</span>" +
-        '<strong class="big-note"></strong><span class="off"></span></header>' +
+        '<header><strong class="big-note"></strong><span class="off"></span></header>' +
         '<div class="stepper">' +
         '<button type="button" data-act="semi-down" aria-label="На полтона ниже">−</button>' +
         '<span class="oct-label"></span>' +
@@ -774,10 +737,30 @@
     }
   }
 
-  function indexFromPointer(event) {
-    var rect = document.getElementById("board").getBoundingClientRect();
-    var x = Math.min(Math.max(event.clientX - rect.left, 0), Math.max(rect.width - 0.01, 0));
-    return Math.min(5, Math.max(0, Math.floor((x / rect.width) * 6)));
+  function stringIndexAt(clientX, clientY) {
+    var cols = document.querySelectorAll("#strings .string-col");
+    var i;
+    for (i = 0; i < cols.length; i++) {
+      var line = cols[i].querySelector(".s-line");
+      if (!line) continue;
+      var rect = line.getBoundingClientRect();
+      var pad = Math.max(0, (16 - rect.width) / 2);
+      if (clientY < rect.top || clientY > rect.bottom) continue;
+      if (clientX < rect.left - pad || clientX > rect.right + pad) continue;
+      return i;
+    }
+    return -1;
+  }
+
+  function pluckAt(clientX, clientY) {
+    var index = stringIndexAt(clientX, clientY);
+    if (index < 0) {
+      lastIndex = -1;
+      return;
+    }
+    if (index === lastIndex) return;
+    lastIndex = index;
+    pluck(index);
   }
 
   function buildNoteList() {
@@ -800,9 +783,8 @@
     document.getElementById("hz-btn").addEventListener("click", function () {
       state.showHz = !state.showHz;
       persist();
-      paintHz();
+      paintLive();
     });
-    document.getElementById("mic-btn").addEventListener("click", toggleMic);
     document.getElementById("fret-down").addEventListener("click", function () { transpose(-1); });
     document.getElementById("fret-up").addEventListener("click", function () { transpose(1); });
     document.getElementById("empty-create").addEventListener("click", function () { location.hash = "edit/new"; });
@@ -861,24 +843,73 @@
     });
 
     var board = document.getElementById("board");
-    board.addEventListener("pointerdown", function (event) {
-      if (board.hidden || !active()) return;
+    function beginDrag(clientX, clientY) {
+      if (board.hidden || !active()) return false;
       dragging = true;
-      board.setPointerCapture(event.pointerId);
-      lastIndex = indexFromPointer(event);
-      pluck(lastIndex);
-    });
-    board.addEventListener("pointermove", function (event) {
+      lastIndex = -1;
+      pluckAt(clientX, clientY);
+      return true;
+    }
+    function endDrag() { dragging = false; lastIndex = -1; }
+    board.addEventListener("touchstart", function (event) {
+      var touch = event.changedTouches[0];
+      if (!beginDrag(touch.clientX, touch.clientY)) return;
+      if (event.cancelable) event.preventDefault();
+    }, { passive: false });
+    board.addEventListener("touchmove", function (event) {
       if (!dragging) return;
-      var index = indexFromPointer(event);
-      if (index !== lastIndex) {
-        lastIndex = index;
-        pluck(index);
+      var touch = event.touches[0];
+      pluckAt(touch.clientX, touch.clientY);
+      if (event.cancelable) event.preventDefault();
+    }, { passive: false });
+    board.addEventListener("touchend", endDrag);
+    board.addEventListener("touchcancel", endDrag);
+    board.addEventListener("pointerdown", function (event) {
+      if (event.pointerType === "touch") return;
+      if (!beginDrag(event.clientX, event.clientY)) return;
+      if (board.setPointerCapture) {
+        try { board.setPointerCapture(event.pointerId); } catch (error) {}
       }
     });
-    function endDrag() { dragging = false; lastIndex = -1; }
-    board.addEventListener("pointerup", endDrag);
+    board.addEventListener("pointermove", function (event) {
+      if (event.pointerType === "touch" || !dragging) return;
+      pluckAt(event.clientX, event.clientY);
+    });
+    board.addEventListener("pointerup", function (event) {
+      if (event.pointerType === "touch") return;
+      endDrag();
+    });
     board.addEventListener("pointercancel", endDrag);
+
+    var tap = null;
+    var swallowClickUntil = 0;
+    document.addEventListener("touchstart", function (event) {
+      var touch = event.changedTouches[0];
+      tap = { x: touch.clientX, y: touch.clientY };
+      primeAudio();
+    }, { capture: true, passive: true });
+    document.addEventListener("touchend", function (event) {
+      var button = event.target.closest("button");
+      if (!button || button.disabled || !tap) return;
+      var touch = event.changedTouches[0];
+      if (Math.abs(touch.clientX - tap.x) > 12 || Math.abs(touch.clientY - tap.y) > 12) return;
+      if (event.cancelable) event.preventDefault();
+      swallowClickUntil = performance.now() + 700;
+      button.click();
+    }, { capture: true, passive: false });
+    document.addEventListener("click", function (event) {
+      if (event.isTrusted && performance.now() < swallowClickUntil) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, true);
+    document.addEventListener("pointerdown", function (event) {
+      if (event.pointerType === "touch") return;
+      primeAudio();
+    }, true);
+    ["gesturestart", "gesturechange", "gestureend"].forEach(function (type) {
+      document.addEventListener(type, function (event) { event.preventDefault(); }, { passive: false });
+    });
 
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape") {
@@ -896,19 +927,23 @@
     });
 
     document.addEventListener("visibilitychange", function () {
-      if (!ctx || !master) return;
-      var time = ctx.currentTime;
+      if (ctx && master) {
+        var time = ctx.currentTime;
+        if (document.hidden) master.gain.setTargetAtTime(0.0001, time, 0.05);
+        else master.gain.setTargetAtTime(1, time, 0.08);
+      }
       if (document.hidden) {
-        master.gain.setTargetAtTime(0.0001, time, 0.03);
         if (micOn) haltMic(true);
-      } else {
-        master.gain.setTargetAtTime(1, time, 0.03);
-        if (userWantsMic) startMic();
+      } else if (!micBlocked && audioPrimed) {
+        startMic();
       }
     });
 
     window.addEventListener("hashchange", renderRoute);
     renderRoute();
+    var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (!ios) startMic();
   }
 
   init();

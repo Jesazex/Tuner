@@ -455,9 +455,11 @@
     var html = "";
     var midi;
     for (midi = TAPE_MIN; midi <= TAPE_MAX; midi++) {
-      var nat = [0, 2, 4, 5, 7, 9, 11].indexOf(Music.pitchClass(midi)) !== -1;
       var left = (midi - TAPE_MIN) * TAPE_STEP;
-      html += '<span class="tape-tick' + (nat ? " nat" : "") + '" style="left:' + left + 'px"></span>';
+      html += '<span class="tape-tick nat" style="left:' + left + 'px"></span>';
+      if (midi < TAPE_MAX) {
+        html += '<span class="tape-tick mid" style="left:' + (left + TAPE_STEP / 2) + 'px"></span>';
+      }
       html += '<span class="tape-note" data-midi="' + midi + '" style="left:' + left + 'px">' + noteHtml(midi) + "</span>";
     }
     var strip = document.getElementById("tape-strip");
@@ -601,7 +603,8 @@
   function syncTuner() {
     clampFretShift();
     var tuning = active();
-    var shiftText = " (" + Music.formatOffset(state.fretShift || 0) + ")";
+    var shift = state.fretShift || 0;
+    var shiftText = shift ? " (" + Music.formatOffset(shift) + ")" : "";
     document.getElementById("tuning-name").textContent = tuning ? "Строй: " + tuning.name + shiftText : "Строй: нет";
     document.getElementById("empty-state").hidden = !!tuning;
     document.getElementById("board").hidden = !tuning;
@@ -663,7 +666,6 @@
         '<span class="tune-head"><span class="tune-name">' + esc(tuning.name) + "</span>" +
         '<span class="tune-notes">' + notes + "</span></span>" +
         '<span class="tune-offs">' + offsets + "</span>" +
-        (tuning.description ? '<span class="tune-desc">' + esc(tuning.description) + "</span>" : "") +
         "</button>" +
         '<div class="tune-actions">' +
         '<button type="button" class="icon-btn edit" data-edit="' + esc(tuning.id) + '" aria-label="Изменить">' + pencilIcon + "</button>" +

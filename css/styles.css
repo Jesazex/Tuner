@@ -84,15 +84,13 @@ h2 { font-size: 26px; }
 
 .readout, .tuning-name { -webkit-appearance: none; appearance: none; }
 #view-tuner { position: relative; }
-.corner-hz {
-  position: absolute;
-  top: calc(8px + env(safe-area-inset-top));
-  right: 14px;
-  z-index: 2;
+.row-hz {
+  flex: none;
+  min-width: 72px;
+  text-align: right;
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   color: var(--brass-2);
   font-size: 12px;
-  pointer-events: none;
 }
 .readout {
   display: block;
@@ -172,7 +170,7 @@ h2 { font-size: 26px; }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: calc(28px + env(safe-area-inset-top)) 12px 4px;
+  padding: calc(10px + env(safe-area-inset-top)) 12px 4px;
 }
 .name-row .pair { flex: none; }
 .tuning-name {
@@ -205,6 +203,17 @@ h2 { font-size: 26px; }
 }
 .chip:disabled { opacity: 0.35; cursor: default; }
 .chip:active:not(:disabled) { transform: translateY(1px); }
+.name-row .chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  font-size: 22px;
+  line-height: 1;
+}
 .pair { display: inline-flex; gap: 8px; }
 
 .board {
@@ -377,7 +386,7 @@ h2 { font-size: 26px; }
   text-align: left;
   background: transparent;
   border: 0;
-  padding: 14px;
+  padding: 10px 12px;
   min-width: 0;
 }
 .tune-head {
@@ -409,22 +418,22 @@ h2 { font-size: 26px; }
 }
 .tune-actions {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 8px 0;
 }
 .icon-btn {
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   border: 0;
-  border-radius: 50%;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
 }
-.icon-btn svg { width: 18px; height: 18px; display: block; }
+.icon-btn svg { width: 15px; height: 15px; display: block; }
 .icon-btn.edit { background: var(--brass); color: #1a1208; }
 .icon-btn.del { background: var(--down); color: #1a1208; }
 
@@ -580,7 +589,7 @@ select.field {
   flex: 1;
   border: 1px solid var(--line);
   background: transparent;
-  border-radius: 999px;
+  border-radius: 12px;
   padding: 10px 8px;
   font-size: 14px;
 }

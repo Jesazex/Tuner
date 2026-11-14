@@ -7,18 +7,18 @@
   <meta name="description" content="Гитарный тюнер: свои строи, шесть струн и распознавание ноты в браузере.">
   <title>Tuner — гитарный тюнер</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/styles.css?v=12">
+  <link rel="stylesheet" href="css/styles.css?v=13">
 </head>
 <body>
   <div class="app">
     <main id="view-tuner" class="view">
-      <span id="readout-hz" class="corner-hz" hidden></span>
       <div class="name-row">
-        <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт (0)</button>
         <div class="pair">
-          <button type="button" class="chip" id="fret-down">− лад</button>
-          <button type="button" class="chip" id="fret-up">+ лад</button>
+          <button type="button" class="chip" id="fret-down" aria-label="На лад ниже">−</button>
+          <button type="button" class="chip" id="fret-up" aria-label="На лад выше">+</button>
         </div>
+        <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт</button>
+        <span id="readout-hz" class="row-hz" hidden></span>
       </div>
       <button type="button" id="readout" class="readout" aria-label="Шкала нот. Нажмите, чтобы открыть список нот.">
         <span class="tape" id="tape">
@@ -98,9 +98,9 @@
   <div id="toast" class="toast" hidden></div>
   <p id="live-region" class="sr-only" aria-live="polite"></p>
 
-  <script src="js/music.js?v=12"></script>
-  <script src="js/pitch-core.js?v=12"></script>
-  <script src="js/synth-core.js?v=12"></script>
-  <script src="js/app.js?v=12"></script>
+  <script src="js/music.js?v=13"></script>
+  <script src="js/pitch-core.js?v=13"></script>
+  <script src="js/synth-core.js?v=13"></script>
+  <script src="js/app.js?v=13"></script>
 </body>
 </html>

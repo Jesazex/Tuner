@@ -62,7 +62,9 @@ for (const freq of [82.41, 110, 196, 329.63]) {
 
 const quiet = detectPitch(sine(110, sampleRate, 4096, 0.001), sampleRate);
 assert(quiet && Math.abs(cents(quiet, 110)) < 8, "quiet sine " + quiet);
-assert(detectPitch(sine(110, sampleRate, 4096, 0.00005), sampleRate) == null, "below gate");
+const whisper = detectPitch(sine(110, sampleRate, 4096, 0.00005), sampleRate);
+assert(whisper && Math.abs(cents(whisper, 110)) < 8, "whisper sine " + whisper);
+assert(detectPitch(sine(110, sampleRate, 4096, 0.000001), sampleRate) == null, "below gate");
 
 function mix(parts, amp) {
   const out = new Float32Array(4096);

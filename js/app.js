@@ -353,7 +353,7 @@
       var buf = new Float32Array(analyser.fftSize);
       if (!audioWorker) {
         try {
-          audioWorker = new Worker("js/pitch-worker.js?v=17");
+          audioWorker = new Worker("js/pitch-worker.js?v=30");
           audioWorker.onmessage = function (event) {
             workerBusy = false;
             if (micOn) onFrequency(event.data ? event.data.freq : null, event.data ? event.data.rms : 0);

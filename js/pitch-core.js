@@ -9,17 +9,17 @@
       var abs = samples[i] < 0 ? -samples[i] : samples[i];
       if (abs > peak) peak = abs;
     }
-    if (peak < 0.0002) return null;
+    if (peak < 0.000005) return null;
     if (peak < 0.3) {
       var boost = 0.3 / peak;
-      if (boost > 24) boost = 24;
+      if (boost > 480) boost = 480;
       for (i = 0; i < n; i++) samples[i] *= boost;
     }
 
     var energy = 0;
     for (i = 0; i < n; i++) energy += samples[i] * samples[i];
     var rms = Math.sqrt(energy / n);
-    if (rms < 0.002) return null;
+    if (rms < 0.0003) return null;
 
     var minFreq = 50;
     var maxFreq = 1000;

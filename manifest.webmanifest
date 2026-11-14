@@ -1,0 +1,9 @@
+{
+  "name": "Tuner",
+  "short_name": "Tuner",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#12100c",
+  "theme_color": "#12100c"
+}

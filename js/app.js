@@ -22,6 +22,8 @@
   var audioPrimed = false;
   var micStream = null;
   var micSource = null;
+  var micHigh = null;
+  var micLow = null;
   var analyser = null;
   var micSink = null;
   var micTimer = 0;
@@ -29,7 +31,12 @@
   var workerBusy = false;
   var workerSentAt = 0;
   var live = null;
-  var hist = [];
+  var pitchWindow = [];
+  var pitchPending = [];
+  var smoothFreq = null;
+  var lastRms = 0;
+  var attackUntil = 0;
+  var wakeLock = null;
   var lastString = null;
   var inTuneHold = false;
   var silenceSince = 0;
@@ -157,7 +164,11 @@
   }
 
   function resetDetection() {
-    hist = [];
+    pitchWindow = [];
+    pitchPending = [];
+    smoothFreq = null;
+    lastRms = 0;
+    attackUntil = 0;
     lastString = null;
     inTuneHold = false;
     live = null;
@@ -267,8 +278,16 @@
     if (micSource) {
       try { micSource.disconnect(); } catch (error) {}
     }
+    if (micHigh) {
+      try { micHigh.disconnect(); } catch (error) {}
+    }
+    if (micLow) {
+      try { micLow.disconnect(); } catch (error) {}
+    }
     if (micStream) micStream.getTracks().forEach(function (track) { track.stop(); });
     micSource = null;
+    micHigh = null;
+    micLow = null;
     micStream = null;
     if (analyser) {
       try { analyser.disconnect(); } catch (error) {}
@@ -308,10 +327,20 @@
       }
       micStream = stream;
       micSource = ctx.createMediaStreamSource(stream);
+      micHigh = ctx.createBiquadFilter();
+      micHigh.type = "highpass";
+      micHigh.frequency.value = 35;
+      micHigh.Q.value = 0.707;
+      micLow = ctx.createBiquadFilter();
+      micLow.type = "lowpass";
+      micLow.frequency.value = 900;
+      micLow.Q.value = 0.707;
       analyser = ctx.createAnalyser();
       analyser.fftSize = 4096;
       analyser.smoothingTimeConstant = 0;
-      micSource.connect(analyser);
+      micSource.connect(micHigh);
+      micHigh.connect(micLow);
+      micLow.connect(analyser);
       if (!micSink) {
         micSink = ctx.createGain();
         micSink.gain.value = 0.00001;
@@ -323,10 +352,10 @@
       var buf = new Float32Array(analyser.fftSize);
       if (!audioWorker) {
         try {
-          audioWorker = new Worker("js/pitch-worker.js");
+          audioWorker = new Worker("js/pitch-worker.js?v=17");
           audioWorker.onmessage = function (event) {
             workerBusy = false;
-            if (micOn) onFrequency(event.data ? event.data.freq : null);
+            if (micOn) onFrequency(event.data ? event.data.freq : null, event.data ? event.data.rms : 0);
           };
           audioWorker.onerror = function () {
             audioWorker = null;
@@ -349,10 +378,12 @@
             audioWorker.postMessage({ samples: copy, sampleRate: ctx.sampleRate }, [copy.buffer]);
           } catch (error) {
             workerBusy = false;
-            onFrequency(detectPitch(buf, ctx.sampleRate));
+            var failedLevel = rmsOf(buf);
+            onFrequency(detectPitch(buf, ctx.sampleRate), failedLevel);
           }
         } else {
-          onFrequency(detectPitch(buf, ctx.sampleRate));
+          var level = rmsOf(buf);
+          onFrequency(detectPitch(buf, ctx.sampleRate), level);
         }
       }, 90);
     }).catch(function (error) {
@@ -378,6 +409,30 @@
     }
     if (ctx.state === "suspended") ctx.resume();
     startMic();
+    syncScreenHold();
+  }
+
+  function rmsOf(samples) {
+    var energy = 0;
+    var i;
+    for (i = 0; i < samples.length; i++) energy += samples[i] * samples[i];
+    return Math.sqrt(energy / samples.length);
+  }
+
+  function medianOf(list) {
+    var sorted = list.slice().sort(function (a, b) { return a - b; });
+    return sorted[sorted.length >> 1];
+  }
+
+  function spreadCents(list) {
+    var mid = medianOf(list);
+    var max = 0;
+    var i;
+    for (i = 0; i < list.length; i++) {
+      var delta = Math.abs(Music.centsBetween(list[i], mid));
+      if (delta > max) max = delta;
+    }
+    return max;
   }
 
   function applyStable(freq) {
@@ -402,13 +457,23 @@
     paintLive();
   }
 
-  function onFrequency(freq) {
+  function onFrequency(freq, rms) {
     var now = performance.now();
+    if (typeof rms === "number" && rms > 0) {
+      if (lastRms > 0.003 && rms > lastRms * 4 && rms > 0.012) attackUntil = now + 80;
+      lastRms = Math.max(rms, lastRms * 0.82);
+    }
+    if (now < attackUntil && freq != null) {
+      silenceSince = 0;
+      return;
+    }
     if (freq == null) {
       if (!silenceSince) silenceSince = now;
       if (now - silenceSince > 520) {
         live = null;
-        hist = [];
+        pitchWindow = [];
+        pitchPending = [];
+        smoothFreq = null;
         lastString = null;
         inTuneHold = false;
         silenceSince = 0;
@@ -417,10 +482,22 @@
       return;
     }
     silenceSince = 0;
-    hist.push(freq);
-    if (hist.length > 3) hist.shift();
-    var sorted = hist.slice().sort(function (a, b) { return a - b; });
-    applyStable(sorted[sorted.length >> 1]);
+    var jumped = smoothFreq != null && Math.abs(Music.centsBetween(freq, smoothFreq)) > 45;
+    if (smoothFreq == null || jumped) {
+      pitchPending.push(freq);
+      if (pitchPending.length > 5) pitchPending.shift();
+      if (pitchPending.length < 3 || spreadCents(pitchPending) > 25) return;
+      pitchWindow = pitchPending.slice();
+      pitchPending = [];
+      smoothFreq = medianOf(pitchWindow);
+      applyStable(smoothFreq);
+      return;
+    }
+    pitchPending = [];
+    pitchWindow.push(freq);
+    if (pitchWindow.length > 5) pitchWindow.shift();
+    smoothFreq = smoothFreq * 0.78 + medianOf(pitchWindow) * 0.22;
+    applyStable(smoothFreq);
   }
 
   function formatNum(value) {
@@ -457,6 +534,7 @@
   var tapeRaf = 0;
   var tapeLast = 0;
   var tapeGesture = null;
+  var tapeCoast = 0;
   var tapeManualUntil = 0;
 
   function midiFloat(freq) {
@@ -517,7 +595,7 @@
   }
 
   function tapeLocked() {
-    return tapeGesture != null || performance.now() < tapeManualUntil;
+    return tapeGesture != null || tapeCoast !== 0 || performance.now() < tapeManualUntil;
   }
 
   function clampTape(value) {
@@ -530,7 +608,31 @@
     if (tapeRaf) clearTimeout(tapeRaf);
     tapeRaf = 0;
     tapeLast = 0;
+    if (tapeCoast) clearTimeout(tapeCoast);
+    tapeCoast = 0;
     if (tapeShown != null) tapeTarget = tapeShown;
+  }
+
+  function coastTape(vx) {
+    if (Math.abs(vx) < 0.05) {
+      tapeManualUntil = performance.now() + 1000;
+      return;
+    }
+    function step() {
+      tapeShown = clampTape(tapeShown - (vx * 16) / TAPE_STEP);
+      tapeTarget = tapeShown;
+      placeTape();
+      markTape();
+      vx *= 0.92;
+      var stopped = Math.abs(vx) < 0.03 || tapeShown === TAPE_MIN || tapeShown === TAPE_MAX;
+      if (stopped) {
+        tapeCoast = 0;
+        tapeManualUntil = performance.now() + 1000;
+        return;
+      }
+      tapeCoast = setTimeout(step, 16);
+    }
+    tapeCoast = setTimeout(step, 16);
   }
 
   function paintTape(freq, inTune) {
@@ -565,22 +667,32 @@
       if (pointer != null) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       pointer = event.pointerId;
-      view.setPointerCapture(event.pointerId);
+      try { view.setPointerCapture(event.pointerId); } catch (error) {}
       stopTapeMotion();
       if (tapeShown == null) tapeShown = tapeTarget == null ? 64 : tapeTarget;
-      tapeGesture = { x: event.clientX, shown: tapeShown };
+      tapeGesture = { x: event.clientX, shown: tapeShown, lastX: event.clientX, lastT: performance.now(), vx: 0 };
       dragTo(event.clientX);
     });
     view.addEventListener("pointermove", function (event) {
       if (!tapeGesture || event.pointerId !== pointer) return;
+      var now = performance.now();
+      var dt = now - tapeGesture.lastT;
+      if (dt < 16) dt = 16;
+      var inst = (event.clientX - tapeGesture.lastX) / dt;
+      if (inst > 2.2) inst = 2.2;
+      if (inst < -2.2) inst = -2.2;
+      tapeGesture.vx = tapeGesture.vx * 0.35 + inst * 0.65;
+      tapeGesture.lastX = event.clientX;
+      tapeGesture.lastT = now;
       dragTo(event.clientX);
       if (event.cancelable) event.preventDefault();
     });
     function endDrag(event) {
       if (event.pointerId !== pointer) return;
+      var vx = tapeGesture ? tapeGesture.vx : 0;
       pointer = null;
       tapeGesture = null;
-      tapeManualUntil = performance.now() + 1000;
+      coastTape(vx);
     }
     view.addEventListener("pointerup", endDrag);
     view.addEventListener("pointercancel", endDrag);
@@ -602,21 +714,22 @@
   function paintReadout() {
     var row = document.getElementById("freq-row");
     var currentEl = document.getElementById("freq-current");
-    var restEl = document.getElementById("freq-rest");
+    var deltaEl = document.getElementById("freq-delta");
+    var targetEl = document.getElementById("freq-target");
     var sounding = pluckedMidi != null && performance.now() < pluckUntil;
     var freq = live ? live.freq : (sounding ? Music.frequency(pluckedMidi) : null);
     var targetMidi = live ? live.target : (sounding ? pluckedMidi : null);
     if (freq && targetMidi != null) {
       var cents = live ? live.cents : 0;
-      row.hidden = false;
       currentEl.textContent = formatNum(freq);
       currentEl.style.color = freqColor(cents);
-      restEl.textContent = " (" + formatSigned(cents) + ") " + formatNum(Music.frequency(targetMidi));
+      deltaEl.textContent = "(" + formatSigned(cents) + ")";
+      targetEl.textContent = formatNum(Music.frequency(targetMidi));
     } else {
-      row.hidden = true;
-      currentEl.textContent = "";
+      currentEl.textContent = "—";
       currentEl.style.color = "";
-      restEl.textContent = "";
+      deltaEl.textContent = "(—)";
+      targetEl.textContent = "—";
     }
     if (live) {
       var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять" : "Опустить";
@@ -704,7 +817,7 @@
     state.fretShift = (state.fretShift || 0) + step;
     persist();
     bufferCache.clear();
-    var stable = hist.length ? hist.slice().sort(function (a, b) { return a - b; })[hist.length >> 1] : null;
+    var stable = smoothFreq;
     lastString = null;
     inTuneHold = false;
     syncTuner();
@@ -870,6 +983,41 @@
       button.classList.toggle("on", on);
       button.setAttribute("aria-pressed", on ? "true" : "false");
     });
+    syncScreenHold();
+  }
+
+  function tunerAwake() {
+    return parseRoute().name === "tuner" && !document.hidden;
+  }
+
+  function lockPortrait() {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock("portrait").catch(function () {});
+    }
+  }
+
+  function syncScreenHold() {
+    lockPortrait();
+    if (!navigator.wakeLock) return;
+    if (!tunerAwake()) {
+      if (wakeLock) {
+        var released = wakeLock;
+        wakeLock = null;
+        released.release().catch(function () {});
+      }
+      return;
+    }
+    if (wakeLock) return;
+    navigator.wakeLock.request("screen").then(function (lock) {
+      if (!tunerAwake()) {
+        lock.release().catch(function () {});
+        return;
+      }
+      wakeLock = lock;
+      lock.addEventListener("release", function () {
+        if (wakeLock === lock) wakeLock = null;
+      });
+    }).catch(function () {});
   }
 
   function parseRoute() {
@@ -1206,6 +1354,7 @@
       } else if (!micBlocked && audioPrimed) {
         startMic();
       }
+      syncScreenHold();
     });
 
     window.addEventListener("hashchange", renderRoute);

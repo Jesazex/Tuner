@@ -64,6 +64,18 @@ const quiet = detectPitch(sine(110, sampleRate, 4096, 0.001), sampleRate);
 assert(quiet && Math.abs(cents(quiet, 110)) < 8, "quiet sine " + quiet);
 assert(detectPitch(sine(110, sampleRate, 4096, 0.00005), sampleRate) == null, "below gate");
 
+function mix(parts, amp) {
+  const out = new Float32Array(4096);
+  for (let i = 0; i < out.length; i++) {
+    let s = 0;
+    for (const part of parts) s += part.a * Math.sin((2 * Math.PI * part.f * i) / sampleRate);
+    out[i] = s * amp;
+  }
+  return out;
+}
+const bright = detectPitch(mix([{ f: 82.41, a: 0.45 }, { f: 164.81, a: 1 }, { f: 247.2, a: 0.7 }], 0.2), sampleRate);
+assert(bright && Math.abs(cents(bright, 82.41)) < 8, "harmonic stays on fundamental " + bright);
+
 for (const freq of [82.41, 110, 196, 246.94, 329.63]) {
   const rendered = renderPluckSamples(freq, sampleRate);
   const start = Math.floor(sampleRate * 0.12);

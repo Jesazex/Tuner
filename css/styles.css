@@ -85,13 +85,25 @@ h2 { font-size: 26px; }
 .readout, .tuning-name { -webkit-appearance: none; appearance: none; }
 #view-tuner { position: relative; }
 .freq-row {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 10px;
+  min-height: 28px;
   margin: 0;
-  padding: 0 16px 6px;
+  padding: 2px 8px 8px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 15px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   color: var(--muted);
 }
+.freq-num {
+  display: inline-block;
+  min-width: 5.6ch;
+  text-align: center;
+}
+#freq-delta { min-width: 7.2ch; }
 .readout {
   display: block;
   width: 100%;
@@ -656,6 +668,28 @@ select.field {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
+}
+
+.turn-portrait {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #12100c;
+  color: var(--ivory);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+}
+.turn-portrait p {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 28px;
+}
+
+@media (orientation: landscape) and (max-height: 520px) and (pointer: coarse) {
+  .turn-portrait { display: flex; }
 }
 
 @media (max-height: 700px) {

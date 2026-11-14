@@ -53,7 +53,7 @@
       cmnd[tau] = running > 0 ? (diff[tau] * tau) / running : 1;
     }
 
-    var threshold = 0.28;
+    var threshold = 0.2;
     tau = tauMin;
     while (tau < tauMax) {
       if (cmnd[tau] < threshold) {
@@ -63,6 +63,16 @@
       tau++;
     }
     if (tau >= tauMax || cmnd[tau] >= threshold) return null;
+
+    var doubled = tau * 2;
+    if (doubled + 1 < cmnd.length) {
+      var best = doubled;
+      var k;
+      for (k = doubled - 2; k <= doubled + 2; k++) {
+        if (k > tau && k < cmnd.length && cmnd[k] < cmnd[best]) best = k;
+      }
+      if (cmnd[best] + 0.02 < cmnd[tau] && cmnd[best] < threshold) tau = best;
+    }
 
     var x0 = tau > 0 ? cmnd[tau - 1] : cmnd[tau];
     var x1 = cmnd[tau];

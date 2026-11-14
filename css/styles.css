@@ -161,7 +161,25 @@ h2 { font-size: 26px; }
   white-space: nowrap;
 }
 .tape-note.on { color: var(--ivory); }
-.tape-note.ok { color: var(--ok); }
+.tape-note.ok, .tape-note.goal { color: var(--ok); }
+.tape.goal-left::before,
+.tape.goal-right::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 28%;
+  z-index: 5;
+  pointer-events: none;
+}
+.tape.goal-left::before {
+  left: 0;
+  background: linear-gradient(90deg, rgba(143, 203, 107, 0.95), rgba(143, 203, 107, 0));
+}
+.tape.goal-right::before {
+  right: 0;
+  background: linear-gradient(270deg, rgba(143, 203, 107, 0.95), rgba(143, 203, 107, 0));
+}
 .tape::after {
   content: "";
   position: absolute;
@@ -251,8 +269,9 @@ h2 { font-size: 26px; }
   height: 100%;
   display: grid;
   grid-template-columns: repeat(6, 1fr);
+  direction: rtl;
 }
-.string-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.string-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; direction: ltr; }
 .s-meta {
   text-align: center;
   padding: 8px 0 6px;

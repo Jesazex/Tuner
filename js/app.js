@@ -536,6 +536,7 @@
   var tapeGesture = null;
   var tapeCoast = 0;
   var tapeManualUntil = 0;
+  var tapeGoalKey = "";
 
   function midiFloat(freq) {
     return 69 + (12 * Math.log(freq / 440)) / Math.LN2;
@@ -563,6 +564,32 @@
     if (!strip || !view || !view.clientWidth || tapeShown == null) return;
     var x = (tapeShown - TAPE_MIN) * TAPE_STEP;
     strip.style.transform = "translateX(" + (view.clientWidth / 2 - x) + "px)";
+    paintGoal();
+  }
+
+  function paintGoal() {
+    var view = document.getElementById("tape");
+    if (!view) return;
+    var sounding = pluckedMidi != null && performance.now() < pluckUntil;
+    var goal = live ? live.target : (sounding ? pluckedMidi : null);
+    var edge = "";
+    if (goal != null) {
+      var note = view.querySelector('.tape-note[data-midi="' + goal + '"]');
+      if (note) {
+        var viewBox = view.getBoundingClientRect();
+        var noteBox = note.getBoundingClientRect();
+        if (noteBox.right < viewBox.left + 10) edge = "left";
+        else if (noteBox.left > viewBox.right - 10) edge = "right";
+      }
+    }
+    var key = (goal == null ? "" : goal) + ":" + edge;
+    if (key === tapeGoalKey) return;
+    tapeGoalKey = key;
+    view.classList.toggle("goal-left", edge === "left");
+    view.classList.toggle("goal-right", edge === "right");
+    document.querySelectorAll(".tape-note").forEach(function (el) {
+      el.classList.toggle("goal", goal != null && edge === "" && Number(el.dataset.midi) === goal);
+    });
   }
 
   function markTape() {
@@ -739,6 +766,7 @@
         document.getElementById("live-region").textContent = Music.midiToName(live.target) + ". " + phrase;
       }
     }
+    paintGoal();
     paintTape(freq, live && live.direction === "ok");
   }
 

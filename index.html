@@ -7,7 +7,7 @@
   <meta name="description" content="Гитарный тюнер: свои строи, шесть струн и распознавание ноты в браузере.">
   <title>Tuner — гитарный тюнер</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/styles.css?v=15">
+  <link rel="stylesheet" href="css/styles.css?v=16">
 </head>
 <body>
   <div class="app">
@@ -18,15 +18,15 @@
           <button type="button" class="chip" id="fret-up" aria-label="На лад выше">+</button>
         </div>
         <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт</button>
-        <span id="readout-hz" class="row-hz" hidden></span>
       </div>
-      <button type="button" id="readout" class="readout" aria-label="Шкала нот. Нажмите, чтобы открыть список нот.">
+      <p id="freq-row" class="freq-row" hidden><span id="freq-current"></span><span id="freq-rest"></span></p>
+      <div id="readout" class="readout" aria-label="Шкала нот. Проведите пальцем, чтобы прокрутить.">
         <span class="tape" id="tape">
           <span class="tape-line"></span>
           <span class="tape-strip" id="tape-strip"></span>
           <span class="tape-mark" id="tape-mark"></span>
         </span>
-      </button>
+      </div>
       <div id="empty-state" class="empty-state" hidden>
         <p>Нет сохранённого строя</p>
         <button type="button" id="empty-create">Новый строй</button>
@@ -46,7 +46,6 @@
 
     <main id="view-settings" class="view" hidden>
       <div class="settings-body">
-        <button type="button" class="set-row" id="hz-toggle" aria-pressed="false">Показывать частоту</button>
         <label class="hint" for="reference-select">Расчет относительно строя</label>
         <select id="reference-select" class="field"></select>
       </div>
@@ -73,17 +72,6 @@
     </nav>
   </div>
 
-  <div id="notes-layer" class="overlay" hidden>
-    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="notes-title">
-      <div class="notes-head">
-        <h2 id="notes-title">Ноты</h2>
-        <button type="button" id="notes-close" aria-label="Закрыть">×</button>
-      </div>
-      <p class="hint">Все ноты по порядку, от низких к высоким. Звучащая подсвечивается.</p>
-      <div id="note-list" class="note-list"></div>
-    </div>
-  </div>
-
   <div id="dialog" class="overlay" hidden>
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
       <h2 id="dialog-title">Удалить строй?</h2>
@@ -98,9 +86,9 @@
   <div id="toast" class="toast" hidden></div>
   <p id="live-region" class="sr-only" aria-live="polite"></p>
 
-  <script src="js/music.js?v=15"></script>
-  <script src="js/pitch-core.js?v=15"></script>
-  <script src="js/synth-core.js?v=15"></script>
-  <script src="js/app.js?v=15"></script>
+  <script src="js/music.js?v=16"></script>
+  <script src="js/pitch-core.js?v=16"></script>
+  <script src="js/synth-core.js?v=16"></script>
+  <script src="js/app.js?v=16"></script>
 </body>
 </html>

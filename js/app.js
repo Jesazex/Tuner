@@ -39,7 +39,6 @@
   var toastTimer = 0;
   var dragging = false;
   var lastIndex = -1;
-  var lastScrolled = null;
 
   function uid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -72,7 +71,6 @@
     return {
       tunings: PRESETS.map(clonePreset),
       activeId: "standard",
-      showHz: false,
       referenceId: "standard",
       fretShift: 0,
     };
@@ -99,10 +97,10 @@
       if (!raw) return defaultState();
       var data = JSON.parse(raw);
       var tunings = Array.isArray(data.tunings) ? data.tunings.map(sanitize).filter(Boolean) : [];
-      if (!tunings.length) return { tunings: [], activeId: null, showHz: !!data.showHz, referenceId: null, fretShift: readShift(data.fretShift) };
+      if (!tunings.length) return { tunings: [], activeId: null, referenceId: null, fretShift: readShift(data.fretShift) };
       var activeId = tunings.some(function (t) { return t.id === data.activeId; }) ? data.activeId : tunings[0].id;
       var referenceId = tunings.some(function (t) { return t.id === data.referenceId; }) ? data.referenceId : "standard";
-      return { tunings: tunings, activeId: activeId, showHz: !!data.showHz, referenceId: referenceId, fretShift: readShift(data.fretShift) };
+      return { tunings: tunings, activeId: activeId, referenceId: referenceId, fretShift: readShift(data.fretShift) };
     } catch (error) {
       return defaultState();
     }
@@ -113,7 +111,6 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         tunings: state.tunings,
         activeId: state.activeId,
-        showHz: state.showHz,
         referenceId: state.referenceId,
         fretShift: state.fretShift || 0,
       }));
@@ -252,7 +249,6 @@
     }, 5650);
     flashString(index);
     if (!live) paintLive();
-    else paintNoteHighlight();
     if (navigator.vibrate) navigator.vibrate(10);
   }
 
@@ -427,20 +423,27 @@
     applyStable(sorted[sorted.length >> 1]);
   }
 
-  function currentHighlight() {
-    if (live) return live.heard;
-    if (performance.now() < pluckUntil) return pluckedMidi;
-    return null;
+  function formatNum(value) {
+    return value.toFixed(1).replace(".", ",");
   }
 
-  function soundingFrequency() {
-    if (live) return live.freq;
-    if (performance.now() < pluckUntil && pluckedMidi != null) return Music.frequency(pluckedMidi);
-    return null;
+  function formatSigned(value) {
+    var text = Math.abs(value).toFixed(1).replace(".", ",");
+    if (value > 0) return "+" + text;
+    if (value < 0) return "\u2212" + text;
+    return text;
   }
 
-  function formatHz(freq) {
-    return freq.toFixed(1).replace(".", ",") + " Hz";
+  function freqColor(cents) {
+    var abs = Math.min(Math.abs(cents), 50);
+    var near = [143, 203, 107];
+    var mid = [240, 195, 106];
+    var far = [225, 123, 100];
+    var from = abs <= 15 ? near : mid;
+    var to = abs <= 15 ? mid : far;
+    var t = abs <= 15 ? abs / 15 : (abs - 15) / 35;
+    function mix(i) { return Math.round(from[i] + (to[i] - from[i]) * t); }
+    return "rgb(" + mix(0) + "," + mix(1) + "," + mix(2) + ")";
   }
 
   var TAPE_MIN = 24;
@@ -453,6 +456,8 @@
   var tapeMarkKey = "";
   var tapeRaf = 0;
   var tapeLast = 0;
+  var tapeGesture = null;
+  var tapeManualUntil = 0;
 
   function midiFloat(freq) {
     return 69 + (12 * Math.log(freq / 440)) / Math.LN2;
@@ -511,9 +516,26 @@
     tapeRaf = setTimeout(function () { animateTape(performance.now()); }, 16);
   }
 
+  function tapeLocked() {
+    return tapeGesture != null || performance.now() < tapeManualUntil;
+  }
+
+  function clampTape(value) {
+    if (value < TAPE_MIN) return TAPE_MIN;
+    if (value > TAPE_MAX) return TAPE_MAX;
+    return value;
+  }
+
+  function stopTapeMotion() {
+    if (tapeRaf) clearTimeout(tapeRaf);
+    tapeRaf = 0;
+    tapeLast = 0;
+    if (tapeShown != null) tapeTarget = tapeShown;
+  }
+
   function paintTape(freq, inTune) {
     var view = document.getElementById("tape");
-    if (!view || !view.clientWidth) return;
+    if (!view || !view.clientWidth || tapeLocked()) return;
     tapeHasFreq = !!freq;
     tapeInTune = !!inTune;
     tapeTarget = freq ? midiFloat(freq) : (active() ? screenNotes(active())[0] : 64);
@@ -526,64 +548,85 @@
     if (!tapeRaf) tapeRaf = setTimeout(function () { animateTape(performance.now()); }, 16);
   }
 
+  function bindTape() {
+    var view = document.getElementById("tape");
+    var pointer = null;
+
+    function dragTo(clientX) {
+      tapeShown = clampTape(tapeGesture.shown - (clientX - tapeGesture.x) / TAPE_STEP);
+      tapeTarget = tapeShown;
+      tapeHasFreq = false;
+      tapeInTune = false;
+      placeTape();
+      markTape();
+    }
+
+    view.addEventListener("pointerdown", function (event) {
+      if (pointer != null) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      pointer = event.pointerId;
+      view.setPointerCapture(event.pointerId);
+      stopTapeMotion();
+      if (tapeShown == null) tapeShown = tapeTarget == null ? 64 : tapeTarget;
+      tapeGesture = { x: event.clientX, shown: tapeShown };
+      dragTo(event.clientX);
+    });
+    view.addEventListener("pointermove", function (event) {
+      if (!tapeGesture || event.pointerId !== pointer) return;
+      dragTo(event.clientX);
+      if (event.cancelable) event.preventDefault();
+    });
+    function endDrag(event) {
+      if (event.pointerId !== pointer) return;
+      pointer = null;
+      tapeGesture = null;
+      tapeManualUntil = performance.now() + 1000;
+    }
+    view.addEventListener("pointerup", endDrag);
+    view.addEventListener("pointercancel", endDrag);
+    view.addEventListener("wheel", function (event) {
+      event.preventDefault();
+      stopTapeMotion();
+      if (tapeShown == null) tapeShown = 64;
+      var delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      tapeShown = clampTape(tapeShown + delta / TAPE_STEP);
+      tapeTarget = tapeShown;
+      tapeHasFreq = false;
+      tapeInTune = false;
+      placeTape();
+      markTape();
+      tapeManualUntil = performance.now() + 1000;
+    }, { passive: false });
+  }
+
   function paintReadout() {
-    var hz = document.getElementById("readout-hz");
+    var row = document.getElementById("freq-row");
+    var currentEl = document.getElementById("freq-current");
+    var restEl = document.getElementById("freq-rest");
     var sounding = pluckedMidi != null && performance.now() < pluckUntil;
     var freq = live ? live.freq : (sounding ? Music.frequency(pluckedMidi) : null);
-    if (state.showHz && freq) {
-      hz.hidden = false;
-      hz.textContent = formatHz(freq);
+    var targetMidi = live ? live.target : (sounding ? pluckedMidi : null);
+    if (freq && targetMidi != null) {
+      var cents = live ? live.cents : 0;
+      row.hidden = false;
+      currentEl.textContent = formatNum(freq);
+      currentEl.style.color = freqColor(cents);
+      restEl.textContent = " (" + formatSigned(cents) + ") " + formatNum(Music.frequency(targetMidi));
     } else {
-      hz.hidden = true;
-      hz.textContent = "";
+      row.hidden = true;
+      currentEl.textContent = "";
+      currentEl.style.color = "";
+      restEl.textContent = "";
     }
     if (live) {
       var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять" : "Опустить";
       var key = live.index + ":" + live.direction;
-      if (hz.dataset.key !== key) {
-        hz.dataset.key = key;
+      if (row.dataset.key !== key) {
+        row.dataset.key = key;
         document.getElementById("live-region").textContent = Music.midiToName(live.target) + ". " + phrase;
       }
     }
     paintTape(freq, live && live.direction === "ok");
-  }
-
-  function paintNoteTags() {
-    var tuning = active();
-    var used = new Set(tuning ? screenNotes(tuning) : []);
-    document.querySelectorAll(".note-row").forEach(function (row) {
-      row.querySelector(".ntag").textContent = used.has(Number(row.dataset.midi)) ? "в строе" : "";
-    });
-  }
-
-  function paintNoteHighlight() {
-    var layer = document.getElementById("notes-layer");
-    if (layer.hidden) return;
-    var midi = currentHighlight();
-    var current = null;
-    document.querySelectorAll(".note-row").forEach(function (row) {
-      var on = midi != null && Number(row.dataset.midi) === midi;
-      row.classList.toggle("on", on);
-      if (on) current = row;
-    });
-    var freq = soundingFrequency();
-    document.querySelectorAll(".nhz").forEach(function (el) { el.textContent = ""; });
-    if (!current) {
-      lastScrolled = null;
-      return;
-    }
-    if (state.showHz && freq && current.querySelector(".nhz")) {
-      current.querySelector(".nhz").textContent = formatHz(freq);
-    }
-    if (String(midi) === lastScrolled) return;
-    var list = document.getElementById("note-list");
-    var listRect = list.getBoundingClientRect();
-    var rowRect = current.getBoundingClientRect();
-    if (rowRect.top < listRect.top || rowRect.bottom > listRect.bottom) {
-      var top = current.offsetTop - list.clientHeight / 2 + current.clientHeight / 2;
-      list.scrollTo({ top: top, behavior: "smooth" });
-    }
-    lastScrolled = String(midi);
   }
 
   function paintLive() {
@@ -594,7 +637,6 @@
       col.classList.toggle("intune", sounding && live.direction === "ok");
     });
     paintReadout();
-    paintNoteHighlight();
   }
 
   function renderBoard() {
@@ -654,7 +696,6 @@
     document.getElementById("fret-down").disabled = !canShift(-1);
     document.getElementById("fret-up").disabled = !canShift(1);
     if (tuning) renderBoard();
-    paintNoteTags();
     paintLive();
   }
 
@@ -861,22 +902,7 @@
     requestAnimationFrame(function () { requestAnimationFrame(centerScales); });
   }
 
-  function closeNotes() {
-    document.getElementById("notes-layer").hidden = true;
-    lastScrolled = null;
-  }
-
-  function openNotes() {
-    paintNoteTags();
-    document.getElementById("notes-layer").hidden = false;
-    lastScrolled = null;
-    paintNoteHighlight();
-  }
-
   function renderSettings() {
-    var toggle = document.getElementById("hz-toggle");
-    toggle.classList.toggle("on", state.showHz);
-    toggle.setAttribute("aria-pressed", state.showHz ? "true" : "false");
     document.getElementById("fret-down").disabled = !canShift(-1);
     document.getElementById("fret-up").disabled = !canShift(1);
     var select = document.getElementById("reference-select");
@@ -887,7 +913,6 @@
   }
 
   function renderRoute() {
-    closeNotes();
     var route = parseRoute();
     if (route.name === "library") {
       renderLibrary();
@@ -928,44 +953,24 @@
     pluck(index);
   }
 
-  function buildNoteList() {
-    document.getElementById("note-list").innerHTML = Music.catalog().map(function (midi) {
-      var cls = Music.pitchClass(midi) === 0 ? "note-row octave-start" : "note-row";
-      return '<div class="' + cls + '" data-midi="' + midi + '" role="listitem">' +
-        '<span class="nn">' + noteHtml(midi) + '</span><span class="note-meta"><span class="ntag"></span><span class="nhz"></span></span></div>';
-    }).join("");
-  }
-
   function init() {
-    buildNoteList();
     buildTape();
+    bindTape();
     document.getElementById("tuning-search").addEventListener("input", function (event) {
       libraryQuery = event.target.value;
       renderLibrary();
     });
     document.getElementById("tuning-name").addEventListener("click", function () { location.hash = "library"; });
-    document.getElementById("readout").addEventListener("click", openNotes);
     document.getElementById("tabs").addEventListener("click", function (event) {
       var button = event.target.closest("[data-tab]");
       if (!button) return;
       location.hash = button.dataset.tab;
-    });
-    document.getElementById("hz-toggle").addEventListener("click", function () {
-      state.showHz = !state.showHz;
-      persist();
-      renderSettings();
-      paintReadout();
-      paintNoteHighlight();
     });
     document.getElementById("reference-select").addEventListener("change", function (event) {
       state.referenceId = event.target.value || null;
       persist();
       if (active()) renderBoard();
       paintLive();
-    });
-    document.getElementById("notes-close").addEventListener("click", closeNotes);
-    document.getElementById("notes-layer").addEventListener("click", function (event) {
-      if (event.target.id === "notes-layer") closeNotes();
     });
     document.getElementById("fret-down").addEventListener("click", function () { transpose(-1); });
     document.getElementById("fret-up").addEventListener("click", function () { transpose(1); });
@@ -1181,9 +1186,7 @@
       if (event.key === "Escape") {
         if (!document.getElementById("dialog").hidden) {
           document.getElementById("dialog").hidden = true;
-          return;
         }
-        if (!document.getElementById("notes-layer").hidden) closeNotes();
         return;
       }
       if (event.repeat) return;

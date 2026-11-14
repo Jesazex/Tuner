@@ -7,30 +7,24 @@
   <meta name="description" content="Гитарный тюнер: свои строи, шесть струн и распознавание ноты в браузере.">
   <title>Tuner — гитарный тюнер</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/styles.css?v=11">
+  <link rel="stylesheet" href="css/styles.css?v=12">
 </head>
 <body>
   <div class="app">
     <main id="view-tuner" class="view">
+      <span id="readout-hz" class="corner-hz" hidden></span>
       <div class="name-row">
-        <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт</button>
+        <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт (0)</button>
         <div class="pair">
           <button type="button" class="chip" id="fret-down">− лад</button>
           <button type="button" class="chip" id="fret-up">+ лад</button>
         </div>
       </div>
-      <button type="button" id="readout" class="readout" aria-label="Ноты и шкала. Нажмите, чтобы открыть список нот.">
-        <span id="meter" class="meter">
-          <span class="meter-track">
-            <span class="meter-line"></span>
-            <span class="zone"></span>
-            <span class="meter-center"></span>
-            <span id="needle" class="needle" hidden></span>
-          </span>
-        </span>
-        <span class="readout-side">
-          <span id="readout-dir"></span>
-          <span id="readout-hz" hidden></span>
+      <button type="button" id="readout" class="readout" aria-label="Шкала нот. Нажмите, чтобы открыть список нот.">
+        <span class="tape" id="tape">
+          <span class="tape-line"></span>
+          <span class="tape-strip" id="tape-strip"></span>
+          <span class="tape-mark" id="tape-mark"></span>
         </span>
       </button>
       <div id="empty-state" class="empty-state" hidden>
@@ -43,14 +37,14 @@
     </main>
 
     <main id="view-library" class="view" hidden>
+      <div class="search-row">
+        <input id="tuning-search" class="field" type="search" autocomplete="off" placeholder="Найти строй">
+      </div>
       <div id="library-list"></div>
       <button type="button" class="fab" id="new-tuning" aria-label="Новый строй">+</button>
     </main>
 
     <main id="view-settings" class="view" hidden>
-      <header class="bar">
-        <h2>Настройки</h2>
-      </header>
       <div class="settings-body">
         <button type="button" class="set-row" id="hz-toggle" aria-pressed="false">Показывать частоту</button>
         <label class="hint" for="reference-select">Расчет относительно строя</label>
@@ -104,9 +98,9 @@
   <div id="toast" class="toast" hidden></div>
   <p id="live-region" class="sr-only" aria-live="polite"></p>
 
-  <script src="js/music.js?v=11"></script>
-  <script src="js/pitch-core.js?v=11"></script>
-  <script src="js/synth-core.js?v=11"></script>
-  <script src="js/app.js?v=11"></script>
+  <script src="js/music.js?v=12"></script>
+  <script src="js/pitch-core.js?v=12"></script>
+  <script src="js/synth-core.js?v=12"></script>
+  <script src="js/app.js?v=12"></script>
 </body>
 </html>

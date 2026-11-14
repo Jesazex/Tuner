@@ -443,48 +443,64 @@
     return freq.toFixed(1).replace(".", ",") + " Hz";
   }
 
+  var TAPE_MIN = 24;
+  var TAPE_MAX = 96;
+  var TAPE_STEP = 62;
+
+  function midiFloat(freq) {
+    return 69 + (12 * Math.log(freq / 440)) / Math.LN2;
+  }
+
+  function buildTape() {
+    var html = "";
+    var midi;
+    for (midi = TAPE_MIN; midi <= TAPE_MAX; midi++) {
+      var nat = [0, 2, 4, 5, 7, 9, 11].indexOf(Music.pitchClass(midi)) !== -1;
+      var left = (midi - TAPE_MIN) * TAPE_STEP;
+      html += '<span class="tape-tick' + (nat ? " nat" : "") + '" style="left:' + left + 'px"></span>';
+      html += '<span class="tape-note" data-midi="' + midi + '" style="left:' + left + 'px">' + noteHtml(midi) + "</span>";
+    }
+    var strip = document.getElementById("tape-strip");
+    strip.innerHTML = html;
+    strip.style.width = ((TAPE_MAX - TAPE_MIN) * TAPE_STEP) + "px";
+  }
+
+  function paintTape(freq, inTune) {
+    var strip = document.getElementById("tape-strip");
+    var view = document.getElementById("tape");
+    if (!strip || !view || !view.clientWidth) return;
+    var value = freq ? midiFloat(freq) : (active() ? screenNotes(active())[0] : 64);
+    var x = (value - TAPE_MIN) * TAPE_STEP;
+    strip.style.transform = "translateX(" + (view.clientWidth / 2 - x) + "px)";
+    var nearest = Math.round(value);
+    strip.querySelectorAll(".tape-note").forEach(function (el) {
+      var on = Number(el.dataset.midi) === nearest && !!freq;
+      el.classList.toggle("on", on);
+      el.classList.toggle("ok", on && !!inTune);
+    });
+    document.getElementById("tape-mark").classList.toggle("ok", !!freq && !!inTune);
+  }
+
   function paintReadout() {
-    var dir = document.getElementById("readout-dir");
     var hz = document.getElementById("readout-hz");
-    var needle = document.getElementById("needle");
     var sounding = pluckedMidi != null && performance.now() < pluckUntil;
-    function showHz(freq) {
-      if (state.showHz && freq) {
-        hz.hidden = false;
-        hz.textContent = formatHz(freq);
-      } else {
-        hz.hidden = true;
-        hz.textContent = "";
+    var freq = live ? live.freq : (sounding ? Music.frequency(pluckedMidi) : null);
+    if (state.showHz && freq) {
+      hz.hidden = false;
+      hz.textContent = formatHz(freq);
+    } else {
+      hz.hidden = true;
+      hz.textContent = "";
+    }
+    if (live) {
+      var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять" : "Опустить";
+      var key = live.index + ":" + live.direction;
+      if (hz.dataset.key !== key) {
+        hz.dataset.key = key;
+        document.getElementById("live-region").textContent = Music.midiToName(live.target) + ". " + phrase;
       }
     }
-    if (!live && !sounding) {
-      dir.textContent = "";
-      dir.className = "";
-      needle.hidden = true;
-      showHz(null);
-      return;
-    }
-    if (!live) {
-      dir.textContent = "";
-      dir.className = "";
-      delete dir.dataset.key;
-      needle.hidden = true;
-      showHz(Music.frequency(pluckedMidi));
-      return;
-    }
-    var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять" : "Опустить";
-    var key = live.index + ":" + live.direction;
-    if (dir.dataset.key !== key) {
-      dir.dataset.key = key;
-      dir.textContent = phrase;
-      document.getElementById("live-region").textContent = Music.midiToName(live.target) + ". " + phrase;
-    }
-    dir.className = "dir-" + live.direction;
-    needle.hidden = false;
-    var clamped = Math.max(-50, Math.min(50, live.cents));
-    needle.style.left = (50 + clamped) + "%";
-    needle.className = "needle dir-" + live.direction;
-    showHz(live.freq);
+    paintTape(freq, live && live.direction === "ok");
   }
 
   function paintNoteTags() {
@@ -585,7 +601,8 @@
   function syncTuner() {
     clampFretShift();
     var tuning = active();
-    document.getElementById("tuning-name").textContent = tuning ? "Строй: " + tuning.name : "Строй: нет";
+    var shiftText = " (" + Music.formatOffset(state.fretShift || 0) + ")";
+    document.getElementById("tuning-name").textContent = tuning ? "Строй: " + tuning.name + shiftText : "Строй: нет";
     document.getElementById("empty-state").hidden = !!tuning;
     document.getElementById("board").hidden = !tuning;
     document.getElementById("fret-down").disabled = !canShift(-1);
@@ -605,7 +622,6 @@
     inTuneHold = false;
     syncTuner();
     if (stable) applyStable(stable);
-    toast(step > 0 ? "Строй поднят на лад" : "Строй опущен на лад");
   }
 
   function toast(message) {
@@ -616,27 +632,42 @@
     toastTimer = setTimeout(function () { el.hidden = true; }, 1600);
   }
 
+  var libraryQuery = "";
+  var pencilIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+  var trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12l1-13H5l1 13z"/></svg>';
+
   function renderLibrary() {
     var root = document.getElementById("library-list");
+    var query = libraryQuery.trim().toLowerCase();
+    var list = state.tunings.filter(function (tuning) {
+      if (!query) return true;
+      var blob = (tuning.name + " " + (tuning.description || "")).toLowerCase();
+      return blob.indexOf(query) !== -1;
+    });
     if (!state.tunings.length) {
       root.innerHTML = '<div class="empty"><p>Пока нет строёв</p><p class="hint">Создайте строй, чтобы настроить гитару или услышать его.</p></div>';
       return;
     }
-    root.innerHTML = state.tunings.map(function (tuning) {
-      var notes = tuning.notes.map(noteHtml).join("  ");
+    if (!list.length) {
+      root.innerHTML = '<div class="empty"><p>Ничего не найдено</p></div>';
+      return;
+    }
+    root.innerHTML = list.map(function (tuning) {
+      var notes = tuning.notes.map(noteHtml).join(" ");
       var offsets = tuning.notes.map(function (midi, index) {
         return Music.formatOffset(offsetAt(midi, index));
       }).join("  ");
       var selected = tuning.id === state.activeId ? " selected" : "";
       return '<article class="tune-card' + selected + '">' +
         '<button type="button" class="tune-open" data-open="' + esc(tuning.id) + '" aria-label="Открыть строй ' + esc(tuning.name) + '">' +
-        '<span class="tune-name">' + esc(tuning.name) + "</span>" +
+        '<span class="tune-head"><span class="tune-name">' + esc(tuning.name) + "</span>" +
+        '<span class="tune-notes">' + notes + "</span></span>" +
+        '<span class="tune-offs">' + offsets + "</span>" +
         (tuning.description ? '<span class="tune-desc">' + esc(tuning.description) + "</span>" : "") +
-        '<span class="tune-notes">' + notes + "</span>" +
-        '<span class="tune-offs">' + offsets + "</span></button>" +
+        "</button>" +
         '<div class="tune-actions">' +
-        '<button type="button" data-edit="' + esc(tuning.id) + '">Изменить</button>' +
-        '<button type="button" class="danger" data-del="' + esc(tuning.id) + '">Удалить</button>' +
+        '<button type="button" class="icon-btn edit" data-edit="' + esc(tuning.id) + '" aria-label="Изменить">' + pencilIcon + "</button>" +
+        '<button type="button" class="icon-btn del" data-del="' + esc(tuning.id) + '" aria-label="Удалить">' + trashIcon + "</button>" +
         "</div></article>";
     }).join("");
   }
@@ -659,13 +690,9 @@
     var off = card.querySelector(".off");
     off.textContent = Music.formatOffset(delta);
     off.className = "off " + (delta > 0 ? "plus" : delta < 0 ? "minus" : "zero");
-    var selected = null;
     card.querySelectorAll(".key").forEach(function (button) {
-      var on = Number(button.dataset.midi) === midi;
-      button.classList.toggle("selected", on);
-      if (on) selected = button;
+      button.classList.toggle("selected", Number(button.dataset.midi) === midi);
     });
-    centerScale(card.querySelector(".scale"));
   }
 
   function centerScale(scale) {
@@ -866,6 +893,11 @@
 
   function init() {
     buildNoteList();
+    buildTape();
+    document.getElementById("tuning-search").addEventListener("input", function (event) {
+      libraryQuery = event.target.value;
+      renderLibrary();
+    });
     document.getElementById("tuning-name").addEventListener("click", function () { location.hash = "library"; });
     document.getElementById("readout").addEventListener("click", openNotes);
     document.getElementById("tabs").addEventListener("click", function (event) {

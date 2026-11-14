@@ -863,7 +863,7 @@
 
   var libraryQuery = "";
   var pencilIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
-  var trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M9 3h6v2h5v2H4V5h5V3zM7 9h10l-1 11H8L7 9zM8 11h2v6H8v-6zM11 11h2v6h-2v-6zM14 11h2v6h-2v-6z"/></svg>';
+  var trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zM7 9h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM5 8h14l-1 13H6L5 8z"/></svg>';
 
   function renderLibrary() {
     var root = document.getElementById("library-list");

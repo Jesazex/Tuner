@@ -1,4 +1,4 @@
-importScripts("pitch-core.js?v=30");
+importScripts("pitch-core.js?v=31");
 
 function rmsOf(samples) {
   var energy = 0;

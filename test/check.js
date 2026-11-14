@@ -53,7 +53,7 @@ for (let i = 1; i < names.length; i++) {
 }
 
 const sampleRate = 48000;
-for (const freq of [82.41, 110, 196, 329.63]) {
+for (const freq of [82.41, 110, 196, 329.63, 659.26, 880, 1174.66, 1318.51]) {
   const detected = detectPitch(sine(freq, sampleRate, 4096, 0.35), sampleRate);
   const error = cents(detected, freq);
   console.log("sine", freq, "->", detected && detected.toFixed(2), "cents", error.toFixed(2));

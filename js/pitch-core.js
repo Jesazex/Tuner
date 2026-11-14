@@ -22,7 +22,7 @@
     if (rms < 0.0003) return null;
 
     var minFreq = 50;
-    var maxFreq = 1000;
+    var maxFreq = 2200;
     var tauMax = Math.floor(sampleRate / minFreq);
     var half = Math.floor(n / 2) - 1;
     if (tauMax > half) tauMax = half;

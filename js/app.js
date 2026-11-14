@@ -333,7 +333,7 @@
       micHigh.Q.value = 0.707;
       micLow = ctx.createBiquadFilter();
       micLow.type = "lowpass";
-      micLow.frequency.value = 900;
+      micLow.frequency.value = 3200;
       micLow.Q.value = 0.707;
       analyser = ctx.createAnalyser();
       analyser.fftSize = 4096;
@@ -353,7 +353,7 @@
       var buf = new Float32Array(analyser.fftSize);
       if (!audioWorker) {
         try {
-          audioWorker = new Worker("js/pitch-worker.js?v=30");
+          audioWorker = new Worker("js/pitch-worker.js?v=31");
           audioWorker.onmessage = function (event) {
             workerBusy = false;
             if (micOn) onFrequency(event.data ? event.data.freq : null, event.data ? event.data.rms : 0);

@@ -7,7 +7,7 @@
     var i;
     for (i = 0; i < n; i++) energy += samples[i] * samples[i];
     var rms = Math.sqrt(energy / n);
-    if (rms < 0.01) return null;
+    if (rms < 0.005) return null;
 
     var minFreq = 50;
     var maxFreq = 1000;

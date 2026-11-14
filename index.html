@@ -7,47 +7,35 @@
   <meta name="description" content="Гитарный тюнер: свои строи, шесть струн и распознавание ноты в браузере.">
   <title>Tuner — гитарный тюнер</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/styles.css?v=3">
+  <link rel="stylesheet" href="css/styles.css?v=5">
 </head>
 <body>
   <div class="app">
     <main id="view-tuner" class="view">
-      <header class="top">
-        <div>
-          <h1>Tuner</h1>
-          <button type="button" id="tuning-name" class="tuning-name">Стандарт</button>
-        </div>
-      </header>
-      <div class="actions">
-        <button type="button" class="chip" id="library-btn">Строи</button>
-        <button type="button" class="chip" id="notes-btn">Ноты</button>
-        <button type="button" class="chip" id="hz-btn" aria-pressed="false">Hz</button>
-        <span class="pair">
-          <button type="button" class="chip" id="fret-down">− лад</button>
-          <button type="button" class="chip" id="fret-up">+ лад</button>
+      <button type="button" id="readout" class="readout" aria-label="Ноты и шкала. Нажмите, чтобы открыть список нот.">
+        <span id="readout-note" class="readout-note"></span>
+        <span id="meter" class="meter">
+          <span class="meter-track">
+            <span class="meter-line"></span>
+            <span class="zone"></span>
+            <span class="meter-center"></span>
+            <span id="needle" class="needle" hidden></span>
+          </span>
         </span>
+        <span class="readout-side">
+          <span id="readout-dir"></span>
+          <span id="readout-hz" hidden></span>
+        </span>
+      </button>
+      <div class="name-row">
+        <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт</button>
+        <button type="button" class="chip" id="settings-btn">Настройки</button>
       </div>
-      <section id="hero" aria-label="Тюнер" hidden>
-        <p id="hero-note" class="hero-note"></p>
-        <p id="hero-heard" class="heard" hidden></p>
-        <p id="hero-dir" class="dir idle"></p>
-        <p id="hero-cents" class="cents" hidden></p>
-        <div id="meter" class="meter" hidden>
-          <div class="meter-track">
-            <div class="meter-line"></div>
-            <div class="zone"></div>
-            <div id="needle" class="needle"></div>
-          </div>
-          <div class="meter-scale"><span>−50</span><span>0</span><span>+50</span></div>
-        </div>
-        <p id="hero-hz" class="hz" hidden></p>
-      </section>
-      <p id="legend" class="legend">Отклонение от стандарта, в ладах.<span class="kbd-hint"> Клавиши 1–6 играют струны слева направо.</span></p>
       <div id="empty-state" class="empty-state" hidden>
         <p>Нет сохранённого строя</p>
         <button type="button" id="empty-create">Новый строй</button>
       </div>
-      <div id="board" class="board" role="group" aria-label="Шесть струн. Коснитесь самой струны, чтобы услышать ноту.">
+      <div id="board" class="board" role="group" aria-label="Шесть струн. Коснитесь струны, чтобы услышать ноту.">
         <div id="strings" class="strings"></div>
       </div>
     </main>
@@ -59,6 +47,24 @@
         <button type="button" class="save" id="new-tuning">Новый</button>
       </header>
       <div id="library-list"></div>
+    </main>
+
+    <main id="view-settings" class="view" hidden>
+      <header class="bar">
+        <button type="button" class="linkish" id="settings-back">Тюнер</button>
+        <h2>Настройки</h2>
+        <span class="bar-spacer" aria-hidden="true"></span>
+      </header>
+      <div class="settings-body">
+        <button type="button" class="set-row" id="hz-toggle" aria-pressed="false">Показывать частоту</button>
+        <p class="hint">Сдвинуть выбранный строй</p>
+        <div class="pair settings-pair">
+          <button type="button" class="chip" id="fret-down">− лад</button>
+          <button type="button" class="chip" id="fret-up">+ лад</button>
+        </div>
+        <p class="hint">Расчет относительно строя</p>
+        <div id="reference-list" class="ref-list"></div>
+      </div>
     </main>
 
     <main id="view-editor" class="view" hidden>
@@ -101,9 +107,9 @@
   <div id="toast" class="toast" hidden></div>
   <p id="live-region" class="sr-only" aria-live="polite"></p>
 
-  <script src="js/music.js?v=3"></script>
-  <script src="js/pitch-core.js?v=3"></script>
-  <script src="js/synth-core.js?v=3"></script>
-  <script src="js/app.js?v=3"></script>
+  <script src="js/music.js?v=5"></script>
+  <script src="js/pitch-core.js?v=5"></script>
+  <script src="js/synth-core.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>

@@ -977,18 +977,26 @@
       var cards = [].filter.call(list.children, function (el) {
         return el.classList.contains("tune-card") && el !== drag.card;
       });
-      var target = null;
+      var index = 0;
       var i;
       for (i = 0; i < cards.length; i++) {
         var box = cards[i].getBoundingClientRect();
-        if (mid < box.top + box.height / 2) {
-          target = cards[i];
+        var above = (placeholder.compareDocumentPosition(cards[i]) & Node.DOCUMENT_POSITION_PRECEDING) !== 0;
+        if (above) {
+          if (mid <= box.bottom - 1) break;
+          index = i + 1;
+        } else if (mid < box.top) {
           break;
+        } else {
+          index = i + 1;
         }
       }
+      var target = cards[index] || null;
+      var sibling = placeholder.nextElementSibling;
+      while (sibling === drag.card) sibling = sibling.nextElementSibling;
       if (target) {
-        if (placeholder.nextElementSibling !== target) list.insertBefore(placeholder, target);
-      } else if (list.lastElementChild !== placeholder) {
+        if (sibling !== target) list.insertBefore(placeholder, target);
+      } else if (sibling) {
         list.appendChild(placeholder);
       }
     }

@@ -162,8 +162,27 @@
 
   function holdSession() {
     var session = navigator.audioSession;
-    if (!session || session.type === "playback") return;
-    try { session.type = "playback"; } catch (error) {}
+    if (!session || session.type === "play-and-record") return;
+    try { session.type = "play-and-record"; } catch (error) {}
+  }
+
+  function preferSpeaker() {
+    if (!ctx || typeof ctx.setSinkId !== "function") return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    navigator.mediaDevices.enumerateDevices().then(function (devices) {
+      var speaker = null;
+      var i;
+      for (i = 0; i < devices.length; i++) {
+        var device = devices[i];
+        if (device.kind !== "audiooutput") continue;
+        if (/speaker|динамик/i.test(device.label || "")) {
+          speaker = device;
+          break;
+        }
+      }
+      if (!speaker || ctx.sinkId === speaker.deviceId) return;
+      ctx.setSinkId(speaker.deviceId).catch(function () {});
+    }).catch(function () {});
   }
 
   function resumeCtx() {
@@ -225,6 +244,7 @@
     resumeCtx();
     if (!document.hidden) {
       restoreMaster();
+      preferSpeaker();
       if (ctx.state === "running") keepAlive();
     }
   }
@@ -439,6 +459,7 @@
       analyser.connect(micSink);
       micOn = true;
       holdSession();
+      preferSpeaker();
       resumeCtx();
       if (!document.hidden) {
         restoreMaster();

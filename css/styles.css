@@ -68,6 +68,14 @@ h1, h2 {
 }
 h1 { font-size: 30px; line-height: 1; }
 h2 { font-size: 26px; }
+#editor-title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .readout, .tuning-name { -webkit-appearance: none; appearance: none; }
 .readout {
@@ -200,7 +208,7 @@ h2 { font-size: 26px; }
   position: relative;
   flex: 1;
   min-height: 220px;
-  margin: 0 12px calc(12px + env(safe-area-inset-bottom));
+  margin: 0 12px 8px;
   border-radius: 22px;
   overflow: hidden;
   touch-action: none;
@@ -383,6 +391,12 @@ h2 { font-size: 26px; }
   font-size: 18px;
 }
 .field.invalid { border-color: var(--down); }
+.desc {
+  display: block;
+  min-height: 72px;
+  resize: vertical;
+  margin-top: 6px;
+}
 .hint { color: var(--muted); font-size: 13px; margin: 8px 2px 0; line-height: 1.4; }
 
 .string-card {
@@ -396,6 +410,10 @@ h2 { font-size: 26px; }
   display: flex;
   align-items: baseline;
   gap: 10px;
+}
+.string-card .label {
+  color: var(--muted);
+  font-size: 13px;
 }
 .big-note {
   font-family: var(--serif);
@@ -423,26 +441,32 @@ h2 { font-size: 26px; }
 .stepper button:disabled { opacity: 0.35; }
 .oct-label { color: var(--muted); font-size: 13px; }
 
-.scale { padding: 2px 0 4px; }
+.scale {
+  overflow-x: auto;
+  padding: 8px 0 4px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-x;
+}
+.scale::-webkit-scrollbar { display: none; }
 .scale-row {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 2px;
+  display: flex;
+  gap: 4px;
+  width: max-content;
 }
 .key {
-  width: 100%;
-  min-width: 0;
+  flex: none;
+  width: 46px;
   height: 36px;
-  padding: 0 1px;
+  padding: 0 2px;
   border: 1px solid rgba(244, 238, 230, 0.28);
   background: transparent;
   color: var(--ivory);
   user-select: none;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1;
 }
-.key.acc { font-size: 10px; }
 .key.selected {
   background: var(--brass);
   border-color: var(--brass);
@@ -471,6 +495,35 @@ h2 { font-size: 26px; }
   color: #1a1208;
 }
 .settings-pair { margin-top: 8px; }
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: #16130f;
+}
+.tabs button {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 999px;
+  padding: 10px 8px;
+  font-size: 14px;
+}
+.tabs button.on {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: #1a1208;
+}
+.app.editing .tabs { display: none; }
+.tune-desc {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
 
 .overlay {
   position: fixed;

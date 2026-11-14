@@ -7,7 +7,7 @@
   <meta name="description" content="Гитарный тюнер: свои строи, шесть струн и распознавание ноты в браузере.">
   <title>Tuner — гитарный тюнер</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/styles.css?v=5">
+  <link rel="stylesheet" href="css/styles.css?v=6">
 </head>
 <body>
   <div class="app">
@@ -29,7 +29,6 @@
       </button>
       <div class="name-row">
         <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт</button>
-        <button type="button" class="chip" id="settings-btn">Настройки</button>
       </div>
       <div id="empty-state" class="empty-state" hidden>
         <p>Нет сохранённого строя</p>
@@ -42,7 +41,6 @@
 
     <main id="view-library" class="view" hidden>
       <header class="bar">
-        <button type="button" class="linkish" id="library-back">Тюнер</button>
         <h2>Строи</h2>
         <button type="button" class="save" id="new-tuning">Новый</button>
       </header>
@@ -51,9 +49,7 @@
 
     <main id="view-settings" class="view" hidden>
       <header class="bar">
-        <button type="button" class="linkish" id="settings-back">Тюнер</button>
         <h2>Настройки</h2>
-        <span class="bar-spacer" aria-hidden="true"></span>
       </header>
       <div class="settings-body">
         <button type="button" class="set-row" id="hz-toggle" aria-pressed="false">Показывать частоту</button>
@@ -70,16 +66,22 @@
     <main id="view-editor" class="view" hidden>
       <header class="bar">
         <button type="button" class="linkish" id="editor-back">Назад</button>
-        <h2>Строй</h2>
+        <h2 id="editor-title">Новый строй</h2>
         <button type="button" class="save" id="save-tuning">Сохранить</button>
       </header>
       <div id="editor-scroll">
         <label class="hint" for="editor-name">Название</label>
-        <input id="editor-name" class="field" maxlength="40" autocomplete="off" placeholder="Например, Drop C">
-        <p class="hint">Диезы стоят между основными нотами. Ими тоже можно собрать строй.</p>
+        <input id="editor-name" class="field" maxlength="40" autocomplete="off" placeholder="Введите название">
+        <label class="hint" for="editor-desc">Описание</label>
+        <textarea id="editor-desc" class="field desc" maxlength="200" placeholder="Введите описание"></textarea>
         <div id="editor-body"></div>
       </div>
     </main>
+    <nav class="tabs" id="tabs">
+      <button type="button" data-tab="tuner">Тюнер</button>
+      <button type="button" data-tab="library">Строй</button>
+      <button type="button" data-tab="settings">Настройки</button>
+    </nav>
   </div>
 
   <div id="notes-layer" class="overlay" hidden>
@@ -107,9 +109,9 @@
   <div id="toast" class="toast" hidden></div>
   <p id="live-region" class="sr-only" aria-live="polite"></p>
 
-  <script src="js/music.js?v=5"></script>
-  <script src="js/pitch-core.js?v=5"></script>
-  <script src="js/synth-core.js?v=5"></script>
-  <script src="js/app.js?v=5"></script>
+  <script src="js/music.js?v=6"></script>
+  <script src="js/pitch-core.js?v=6"></script>
+  <script src="js/synth-core.js?v=6"></script>
+  <script src="js/app.js?v=6"></script>
 </body>
 </html>

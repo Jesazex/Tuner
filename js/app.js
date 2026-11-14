@@ -1,5 +1,6 @@
 (function () {
   var STORAGE_KEY = "struna.v1";
+  var FRET_LIMIT = 10;
   var PRESETS = [
     { id: "standard", name: "Стандарт", notes: [64, 59, 55, 50, 45, 40], builtin: true },
     { id: "drop-d", name: "Drop D", notes: [64, 59, 55, 50, 45, 38], builtin: true },
@@ -57,6 +58,7 @@
       name: preset.name,
       notes: preset.notes.slice(),
       builtin: !!preset.builtin,
+      description: preset.description || "",
     };
   }
 
@@ -80,7 +82,8 @@
     }
     var name = entry.name.trim().slice(0, 40);
     if (!name) return null;
-    return { id: String(entry.id || uid()), name: name, notes: notes, builtin: !!entry.builtin };
+    var description = typeof entry.description === "string" ? entry.description.trim().slice(0, 200) : "";
+    return { id: String(entry.id || uid()), name: name, notes: notes, builtin: !!entry.builtin, description: description };
   }
 
   function loadState() {
@@ -513,12 +516,20 @@
     }).join("");
   }
 
+  function stringLabel(index) {
+    return (index + 1) + "-я струна";
+  }
+
+  function withinStandard(midi, index) {
+    var base = Music.STANDARD[index];
+    return midi >= base - FRET_LIMIT && midi <= base + FRET_LIMIT;
+  }
+
   function canShift(step) {
     var tuning = active();
     if (!tuning) return false;
-    return tuning.notes.every(function (midi) {
-      var next = midi + step;
-      return next >= Music.MIN_MIDI && next <= Music.MAX_MIDI;
+    return tuning.notes.every(function (midi, index) {
+      return withinStandard(midi + step, index);
     });
   }
 
@@ -571,6 +582,7 @@
       return '<article class="tune-card' + selected + '">' +
         '<button type="button" class="tune-open" data-open="' + esc(tuning.id) + '" aria-label="Открыть строй ' + esc(tuning.name) + '">' +
         '<span class="tune-name">' + esc(tuning.name) + "</span>" +
+        (tuning.description ? '<span class="tune-desc">' + esc(tuning.description) + "</span>" : "") +
         '<span class="tune-notes">' + notes + "</span>" +
         '<span class="tune-offs">' + offsets + "</span></button>" +
         '<div class="tune-actions">' +
@@ -580,47 +592,51 @@
     }).join("");
   }
 
-  function scaleHtml() {
-    var names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-    return '<div class="scale"><div class="scale-row">' + names.map(function (name, pc) {
-      var cls = name.length > 1 ? "key acc" : "key";
-      return '<button type="button" class="' + cls + '" data-pc="' + pc + '">' + name + "</button>";
-    }).join("") + "</div></div>";
+  function scaleHtml(index) {
+    var base = Music.STANDARD[index];
+    var html = "";
+    var midi;
+    for (midi = base - FRET_LIMIT; midi <= base + FRET_LIMIT; midi++) {
+      html += '<button type="button" class="key" data-midi="' + midi + '">' + Music.midiToName(midi) + "</button>";
+    }
+    return '<div class="scale"><div class="scale-row">' + html + "</div></div>";
   }
 
   function refreshString(index) {
     var card = document.getElementById("string-card-" + index);
     var midi = draft.notes[index];
-    var pc = Music.pitchClass(midi);
     var delta = offsetAt(midi, index);
     card.querySelector(".big-note").textContent = Music.midiToName(midi);
     var off = card.querySelector(".off");
     off.textContent = Music.formatOffset(delta);
     off.className = "off " + (delta > 0 ? "plus" : delta < 0 ? "minus" : "zero");
-    card.querySelector(".oct-label").textContent = "октава " + Music.octaveOf(midi);
+    var selected = null;
     card.querySelectorAll(".key").forEach(function (button) {
-      button.classList.toggle("selected", Number(button.dataset.pc) === pc);
+      var on = Number(button.dataset.midi) === midi;
+      button.classList.toggle("selected", on);
+      if (on) selected = button;
     });
-    card.querySelector('[data-act="semi-down"]').disabled = midi - 1 < Music.MIN_MIDI;
-    card.querySelector('[data-act="semi-up"]').disabled = midi + 1 > Music.MAX_MIDI;
-    var octave = Music.octaveOf(midi);
-    card.querySelector('[data-act="oct-down"]').disabled = Music.midiFrom(pc, octave - 1) < Music.MIN_MIDI;
-    card.querySelector('[data-act="oct-up"]').disabled = Music.midiFrom(pc, octave + 1) > Music.MAX_MIDI;
+    if (selected) {
+      var scale = card.querySelector(".scale");
+      scale.scrollLeft = selected.offsetLeft - scale.clientWidth / 2 + selected.clientWidth / 2;
+    }
+  }
+
+  function paintEditorTitle() {
+    var name = document.getElementById("editor-name").value.trim();
+    document.getElementById("editor-title").textContent = name || "Новый строй";
   }
 
   function renderEditor() {
     document.getElementById("editor-name").value = draft.name;
     document.getElementById("editor-name").classList.remove("invalid");
+    document.getElementById("editor-desc").value = draft.description || "";
+    paintEditorTitle();
     document.getElementById("editor-body").innerHTML = draft.notes.map(function (midi, index) {
       return '<article class="string-card" id="string-card-' + index + '" data-index="' + index + '">' +
-        '<header><strong class="big-note"></strong><span class="off"></span></header>' +
-        '<div class="stepper">' +
-        '<button type="button" data-act="semi-down" aria-label="На полтона ниже">−</button>' +
-        '<span class="oct-label"></span>' +
-        '<button type="button" data-act="oct-down" aria-label="Октавой ниже">− окт</button>' +
-        '<button type="button" data-act="oct-up" aria-label="Октавой выше">+ окт</button>' +
-        '<button type="button" data-act="semi-up" aria-label="На полтона выше">+</button>' +
-        "</div>" + scaleHtml() + "</article>";
+        '<header><span class="label">' + stringLabel(index) + '</span>' +
+        '<strong class="big-note"></strong><span class="off"></span></header>' +
+        scaleHtml(index) + "</article>";
     }).join("");
     draft.notes.forEach(function (_, index) { refreshString(index); });
     if (!draft.name) {
@@ -631,6 +647,7 @@
   function saveDraft() {
     var input = document.getElementById("editor-name");
     var name = input.value.trim();
+    var description = document.getElementById("editor-desc").value.trim().slice(0, 200);
     if (!name) {
       input.classList.add("invalid");
       input.focus();
@@ -640,11 +657,11 @@
     var id = draft.id;
     if (!id) {
       id = uid();
-      state.tunings = state.tunings.concat([{ id: id, name: name, notes: notes, builtin: false }]);
+      state.tunings = state.tunings.concat([{ id: id, name: name, notes: notes, builtin: false, description: description }]);
     } else {
       state.tunings = state.tunings.map(function (tuning) {
         if (tuning.id !== id) return tuning;
-        return { id: id, name: name, notes: notes, builtin: false };
+        return { id: id, name: name, notes: notes, builtin: false, description: description };
       });
     }
     state.activeId = id;
@@ -674,6 +691,12 @@
     document.getElementById("view-library").hidden = name !== "library";
     document.getElementById("view-editor").hidden = name !== "editor";
     document.getElementById("view-settings").hidden = name !== "settings";
+    document.querySelector(".app").classList.toggle("editing", name === "editor");
+    document.querySelectorAll("#tabs button").forEach(function (button) {
+      var on = button.dataset.tab === name;
+      button.classList.toggle("on", on);
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+    });
   }
 
   function parseRoute() {
@@ -690,6 +713,7 @@
       draft = {
         id: null,
         name: "",
+        description: "",
         notes: base ? base.notes.slice() : Music.STANDARD.slice(),
       };
     } else {
@@ -698,7 +722,7 @@
         location.hash = "library";
         return;
       }
-      draft = { id: tuning.id, name: tuning.name, notes: tuning.notes.slice() };
+      draft = { id: tuning.id, name: tuning.name, description: tuning.description || "", notes: tuning.notes.slice() };
     }
     renderEditor();
     showView("editor");
@@ -782,8 +806,11 @@
     buildNoteList();
     document.getElementById("tuning-name").addEventListener("click", function () { location.hash = "library"; });
     document.getElementById("readout").addEventListener("click", openNotes);
-    document.getElementById("settings-btn").addEventListener("click", function () { location.hash = "settings"; });
-    document.getElementById("settings-back").addEventListener("click", function () { location.hash = "tuner"; });
+    document.getElementById("tabs").addEventListener("click", function (event) {
+      var button = event.target.closest("[data-tab]");
+      if (!button) return;
+      location.hash = button.dataset.tab;
+    });
     document.getElementById("hz-toggle").addEventListener("click", function () {
       state.showHz = !state.showHz;
       persist();
@@ -806,7 +833,6 @@
     document.getElementById("fret-down").addEventListener("click", function () { transpose(-1); });
     document.getElementById("fret-up").addEventListener("click", function () { transpose(1); });
     document.getElementById("empty-create").addEventListener("click", function () { location.hash = "edit/new"; });
-    document.getElementById("library-back").addEventListener("click", function () { location.hash = "tuner"; });
     document.getElementById("new-tuning").addEventListener("click", function () { location.hash = "edit/new"; });
     document.getElementById("editor-back").addEventListener("click", function () { location.hash = "library"; });
     document.getElementById("save-tuning").addEventListener("click", saveDraft);
@@ -818,27 +844,16 @@
     });
     document.getElementById("editor-name").addEventListener("input", function (event) {
       event.target.classList.remove("invalid");
+      paintEditorTitle();
     });
     document.getElementById("editor-body").addEventListener("click", function (event) {
       var card = event.target.closest(".string-card");
-      if (!card || !draft) return;
+      var key = event.target.closest("[data-midi]");
+      if (!card || !key || !draft) return;
       var index = Number(card.dataset.index);
-      var key = event.target.closest("[data-pc]");
-      var midi = draft.notes[index];
-      var pc = Music.pitchClass(midi);
-      var octave = Music.octaveOf(midi);
-      var next = midi;
-      if (key) {
-        next = Music.midiFrom(Number(key.dataset.pc), octave);
-      } else {
-        var act = event.target.closest("[data-act]");
-        if (!act) return;
-        if (act.dataset.act === "semi-down") next = midi - 1;
-        if (act.dataset.act === "semi-up") next = midi + 1;
-        if (act.dataset.act === "oct-down") next = Music.midiFrom(pc, octave - 1);
-        if (act.dataset.act === "oct-up") next = Music.midiFrom(pc, octave + 1);
-      }
-      if (next >= Music.MIN_MIDI && next <= Music.MAX_MIDI) draft.notes[index] = next;
+      var next = Number(key.dataset.midi);
+      if (!withinStandard(next, index)) return;
+      draft.notes[index] = next;
       refreshString(index);
     });
     document.getElementById("library-list").addEventListener("click", function (event) {

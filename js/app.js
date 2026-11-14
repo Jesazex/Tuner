@@ -862,6 +862,9 @@
   }
 
   var libraryQuery = "";
+  var libraryDrag = null;
+  var libraryDragged = false;
+  var gripIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 5h2v2H9V5zm4 0h2v2h-2V5zM9 9h2v2H9V9zm4 0h2v2h-2V9zM9 13h2v2H9v-2zm4 0h2v2h-2v-2zM9 17h2v2H9v-2zm4 0h2v2h-2v-2z"/></svg>';
   var pencilIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
   var trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zM7 9h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM5 8h14l-1 13H6L5 8z"/></svg>';
 
@@ -887,7 +890,8 @@
         return Music.formatOffset(offsetAt(midi, index));
       }).join("  ");
       var selected = tuning.id === state.activeId ? " selected" : "";
-      return '<article class="tune-card' + selected + '">' +
+      return '<article class="tune-card' + selected + '" data-id="' + esc(tuning.id) + '">' +
+        '<button type="button" class="drag-handle" data-drag aria-label="Переместить строй">' + gripIcon + "</button>" +
         '<button type="button" class="tune-open" data-open="' + esc(tuning.id) + '" aria-label="Открыть строй ' + esc(tuning.name) + '">' +
         '<span class="tune-name">' + esc(tuning.name) + "</span>" +
         '<span class="tune-notes">' + notes + "</span>" +
@@ -898,6 +902,73 @@
         '<button type="button" class="icon-btn del" data-del="' + esc(tuning.id) + '" aria-label="Удалить">' + trashIcon + "</button>" +
         "</div></article>";
     }).join("");
+  }
+
+  function commitLibraryOrder() {
+    var ids = [].map.call(document.querySelectorAll("#library-list .tune-card"), function (card) {
+      return card.dataset.id;
+    });
+    var byId = {};
+    var visible = {};
+    state.tunings.forEach(function (tuning) { byId[tuning.id] = tuning; });
+    ids.forEach(function (id) { visible[id] = true; });
+    var queue = ids.slice();
+    var next = state.tunings.map(function (tuning) {
+      if (!visible[tuning.id]) return tuning;
+      return byId[queue.shift()];
+    });
+    var same = next.every(function (tuning, index) { return tuning === state.tunings[index]; });
+    if (same) return;
+    state.tunings = next;
+    persist();
+  }
+
+  function bindLibraryDrag() {
+    var list = document.getElementById("library-list");
+
+    function finish(event) {
+      if (!libraryDrag || event.pointerId !== libraryDrag.pointer) return;
+      libraryDrag.card.classList.remove("dragging");
+      if (libraryDrag.moved) {
+        libraryDragged = true;
+        commitLibraryOrder();
+      }
+      libraryDrag = null;
+    }
+
+    list.addEventListener("pointerdown", function (event) {
+      var handle = event.target.closest("[data-drag]");
+      if (!handle) return;
+      var card = handle.closest(".tune-card");
+      if (!card) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      libraryDrag = { card: card, pointer: event.pointerId, moved: false };
+      try { handle.setPointerCapture(event.pointerId); } catch (error) {}
+    });
+    list.addEventListener("pointermove", function (event) {
+      if (!libraryDrag || event.pointerId !== libraryDrag.pointer) return;
+      var card = libraryDrag.card;
+      var prev = card.previousElementSibling;
+      var next = card.nextElementSibling;
+      if (prev && prev.classList.contains("tune-card")) {
+        var prevBox = prev.getBoundingClientRect();
+        if (event.clientY < prevBox.top + prevBox.height / 2) {
+          list.insertBefore(card, prev);
+          libraryDrag.moved = true;
+        }
+      }
+      if (next && next.classList.contains("tune-card")) {
+        var nextBox = next.getBoundingClientRect();
+        if (event.clientY > nextBox.top + nextBox.height / 2) {
+          list.insertBefore(next, card);
+          libraryDrag.moved = true;
+        }
+      }
+      if (libraryDrag.moved) card.classList.add("dragging");
+      if (event.cancelable) event.preventDefault();
+    });
+    list.addEventListener("pointerup", finish);
+    list.addEventListener("pointercancel", finish);
   }
 
   function scaleHtml(index) {
@@ -1059,12 +1130,11 @@
 
   function openEditor(id) {
     if (id === "new") {
-      var base = active();
       draft = {
         id: null,
         name: "",
         description: "",
-        notes: base ? base.notes.slice() : Music.STANDARD.slice(),
+        notes: Music.STANDARD.slice(),
       };
     } else {
       var tuning = state.tunings.find(function (item) { return item.id === id; });
@@ -1137,6 +1207,7 @@
       libraryQuery = event.target.value;
       renderLibrary();
     });
+    bindLibraryDrag();
     document.getElementById("tuning-name").addEventListener("click", function () { location.hash = "library"; });
     document.getElementById("tabs").addEventListener("click", function (event) {
       var button = event.target.closest("[data-tab]");
@@ -1272,6 +1343,12 @@
       refreshString(index);
     });
     document.getElementById("library-list").addEventListener("click", function (event) {
+      if (libraryDragged) {
+        libraryDragged = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       var edit = event.target.closest("[data-edit]");
       if (edit) {
         location.hash = "edit/" + encodeURIComponent(edit.dataset.edit);

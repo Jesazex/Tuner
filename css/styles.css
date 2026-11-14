@@ -389,19 +389,14 @@ h2 { font-size: 26px; }
   padding: 10px 12px;
   min-width: 0;
 }
-.tune-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
 .tune-name {
-  flex: none;
+  display: block;
   font-family: var(--serif);
   font-size: 22px;
 }
 .tune-notes {
-  flex: 1;
+  display: block;
+  margin-top: 4px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

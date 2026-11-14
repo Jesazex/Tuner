@@ -446,6 +446,13 @@
   var TAPE_MIN = 24;
   var TAPE_MAX = 96;
   var TAPE_STEP = 62;
+  var tapeShown = null;
+  var tapeTarget = null;
+  var tapeHasFreq = false;
+  var tapeInTune = false;
+  var tapeMarkKey = "";
+  var tapeRaf = 0;
+  var tapeLast = 0;
 
   function midiFloat(freq) {
     return 69 + (12 * Math.log(freq / 440)) / Math.LN2;
@@ -467,20 +474,56 @@
     strip.style.width = ((TAPE_MAX - TAPE_MIN) * TAPE_STEP) + "px";
   }
 
-  function paintTape(freq, inTune) {
+  function placeTape() {
     var strip = document.getElementById("tape-strip");
     var view = document.getElementById("tape");
-    if (!strip || !view || !view.clientWidth) return;
-    var value = freq ? midiFloat(freq) : (active() ? screenNotes(active())[0] : 64);
-    var x = (value - TAPE_MIN) * TAPE_STEP;
+    if (!strip || !view || !view.clientWidth || tapeShown == null) return;
+    var x = (tapeShown - TAPE_MIN) * TAPE_STEP;
     strip.style.transform = "translateX(" + (view.clientWidth / 2 - x) + "px)";
-    var nearest = Math.round(value);
-    strip.querySelectorAll(".tape-note").forEach(function (el) {
-      var on = Number(el.dataset.midi) === nearest && !!freq;
+  }
+
+  function markTape() {
+    var nearest = Math.round(tapeShown);
+    var key = nearest + ":" + (tapeHasFreq ? 1 : 0) + ":" + (tapeInTune ? 1 : 0);
+    if (key === tapeMarkKey) return;
+    tapeMarkKey = key;
+    document.querySelectorAll(".tape-note").forEach(function (el) {
+      var on = tapeHasFreq && Number(el.dataset.midi) === nearest;
       el.classList.toggle("on", on);
-      el.classList.toggle("ok", on && !!inTune);
+      el.classList.toggle("ok", on && tapeInTune);
     });
-    document.getElementById("tape-mark").classList.toggle("ok", !!freq && !!inTune);
+    document.getElementById("tape-mark").classList.toggle("ok", tapeHasFreq && tapeInTune);
+  }
+
+  function animateTape(now) {
+    var dt = tapeLast ? Math.min(48, now - tapeLast) : 16;
+    tapeLast = now;
+    var k = 1 - Math.exp(-dt / 220);
+    tapeShown += (tapeTarget - tapeShown) * k;
+    if (Math.abs(tapeTarget - tapeShown) < 0.01) tapeShown = tapeTarget;
+    placeTape();
+    markTape();
+    if (tapeShown === tapeTarget) {
+      tapeRaf = 0;
+      tapeLast = 0;
+      return;
+    }
+    tapeRaf = setTimeout(function () { animateTape(performance.now()); }, 16);
+  }
+
+  function paintTape(freq, inTune) {
+    var view = document.getElementById("tape");
+    if (!view || !view.clientWidth) return;
+    tapeHasFreq = !!freq;
+    tapeInTune = !!inTune;
+    tapeTarget = freq ? midiFloat(freq) : (active() ? screenNotes(active())[0] : 64);
+    if (tapeShown == null) {
+      tapeShown = tapeTarget;
+      placeTape();
+      markTape();
+      return;
+    }
+    if (!tapeRaf) tapeRaf = setTimeout(function () { animateTape(performance.now()); }, 16);
   }
 
   function paintReadout() {
@@ -663,8 +706,8 @@
       var selected = tuning.id === state.activeId ? " selected" : "";
       return '<article class="tune-card' + selected + '">' +
         '<button type="button" class="tune-open" data-open="' + esc(tuning.id) + '" aria-label="Открыть строй ' + esc(tuning.name) + '">' +
-        '<span class="tune-head"><span class="tune-name">' + esc(tuning.name) + "</span>" +
-        '<span class="tune-notes">' + notes + "</span></span>" +
+        '<span class="tune-name">' + esc(tuning.name) + "</span>" +
+        '<span class="tune-notes">' + notes + "</span>" +
         '<span class="tune-offs">' + offsets + "</span>" +
         "</button>" +
         '<div class="tune-actions">' +

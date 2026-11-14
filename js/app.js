@@ -19,7 +19,6 @@
   var micOn = false;
   var micStarting = false;
   var micBlocked = false;
-  var micRestarts = 0;
   var audioPrimed = false;
   var micStream = null;
   var micSource = null;
@@ -47,8 +46,6 @@
   var toastTimer = 0;
   var dragging = false;
   var lastIndex = -1;
-  var keepNode = null;
-  var resumeAt = 0;
 
   function uid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -162,91 +159,8 @@
 
   function holdSession() {
     var session = navigator.audioSession;
-    if (!session || session.type === "play-and-record") return;
+    if (!session) return;
     try { session.type = "play-and-record"; } catch (error) {}
-  }
-
-  function preferSpeaker() {
-    if (!ctx || typeof ctx.setSinkId !== "function") return;
-    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
-    navigator.mediaDevices.enumerateDevices().then(function (devices) {
-      var speaker = null;
-      var i;
-      for (i = 0; i < devices.length; i++) {
-        var device = devices[i];
-        if (device.kind !== "audiooutput") continue;
-        if (/speaker|динамик/i.test(device.label || "")) {
-          speaker = device;
-          break;
-        }
-      }
-      if (!speaker || ctx.sinkId === speaker.deviceId) return;
-      ctx.setSinkId(speaker.deviceId).catch(function () {});
-    }).catch(function () {});
-  }
-
-  function resumeCtx() {
-    if (!ctx || ctx.state === "running" || ctx.state === "closed") return;
-    var now = performance.now();
-    if (now - resumeAt < 300) return;
-    resumeAt = now;
-    ctx.resume().catch(function () {});
-  }
-
-  function restoreMaster() {
-    if (!ctx || !master || document.hidden) return;
-    var gain = master.gain;
-    var time = ctx.currentTime;
-    gain.cancelScheduledValues(time);
-    gain.setValueAtTime(1, time);
-  }
-
-  function duckMaster() {
-    if (!ctx || !master) return;
-    var gain = master.gain;
-    var time = ctx.currentTime;
-    gain.cancelScheduledValues(time);
-    var current = gain.value > 0.001 ? gain.value : 0.001;
-    gain.setValueAtTime(current, time);
-    gain.linearRampToValueAtTime(0.0001, time + 0.05);
-  }
-
-  function stopKeepAlive() {
-    if (!keepNode) return;
-    var node = keepNode;
-    keepNode = null;
-    try { node.onended = null; } catch (error) {}
-    try { node.stop(); } catch (error) {}
-    try { node.disconnect(); } catch (error) {}
-  }
-
-  function keepAlive() {
-    if (!ctx || ctx.state !== "running" || keepNode || document.hidden) return;
-    var length = Math.max(8, Math.floor(ctx.sampleRate * 0.25));
-    var buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-    var data = buffer.getChannelData(0);
-    var i;
-    for (i = 0; i < length; i++) data[i] = (i & 1) ? 0.00002 : -0.00002;
-    var source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.loop = true;
-    source.connect(ctx.destination);
-    source.onended = function () {
-      if (keepNode === source) keepNode = null;
-    };
-    try { source.start(); } catch (error) { return; }
-    keepNode = source;
-  }
-
-  function wakeAudio() {
-    if (!ctx) return;
-    holdSession();
-    resumeCtx();
-    if (!document.hidden) {
-      restoreMaster();
-      preferSpeaker();
-      if (ctx.state === "running") keepAlive();
-    }
   }
 
   function resetDetection() {
@@ -283,17 +197,8 @@
       master.connect(highpass);
       highpass.connect(comp);
       comp.connect(ctx.destination);
-      ctx.onstatechange = function () {
-        if (!ctx || document.hidden) return;
-        if (ctx.state === "running") {
-          restoreMaster();
-          keepAlive();
-          return;
-        }
-        resumeCtx();
-      };
     }
-    resumeCtx();
+    if (ctx.state === "suspended") ctx.resume();
     return ctx;
   }
 
@@ -327,16 +232,6 @@
     if (!tuning || index < 0 || index > 5) return;
     var midi = tuning.notes[index] + (state.fretShift || 0);
     var audio = ensureCtx();
-    holdSession();
-    if (audio.state !== "running") {
-      resumeCtx();
-      audio.resume().then(function () {
-        if (ctx && ctx.state === "running") pluck(index);
-      }).catch(function () {});
-      return;
-    }
-    restoreMaster();
-    keepAlive();
     var i;
     for (i = 0; i < playing.length; i++) {
       if (playing[i].midi === midi) releaseVoice(playing[i], 0.16);
@@ -389,12 +284,7 @@
     if (micLow) {
       try { micLow.disconnect(); } catch (error) {}
     }
-    if (micStream) {
-      micStream.getTracks().forEach(function (track) {
-        track.onended = null;
-        track.stop();
-      });
-    }
+    if (micStream) micStream.getTracks().forEach(function (track) { track.stop(); });
     micSource = null;
     micHigh = null;
     micLow = null;
@@ -458,27 +348,7 @@
       }
       analyser.connect(micSink);
       micOn = true;
-      holdSession();
-      preferSpeaker();
-      resumeCtx();
-      if (!document.hidden) {
-        restoreMaster();
-        keepAlive();
-      }
-      stream.getTracks().forEach(function (track) {
-        track.onended = function () {
-          if (micStream !== stream || micBlocked || document.hidden) return;
-          haltMic(true);
-          if (micRestarts >= 1) return;
-          micRestarts += 1;
-          setTimeout(function () {
-            if (!micOn && !micStarting && !micBlocked && !document.hidden) startMic();
-          }, 500);
-        };
-      });
-      setTimeout(function () {
-        if (micStream === stream && micOn) micRestarts = 0;
-      }, 2000);
+      if (ctx.state === "suspended") ctx.resume();
       paintLive();
       var buf = new Float32Array(analyser.fftSize);
       if (!audioWorker) {
@@ -528,12 +398,17 @@
 
   function primeAudio() {
     ensureCtx();
-    holdSession();
-    audioPrimed = true;
-    restoreMaster();
-    resumeCtx();
-    if (ctx.state === "running") keepAlive();
-    else ctx.resume().then(function () { if (!document.hidden) keepAlive(); }).catch(function () {});
+    if (!audioPrimed) {
+      audioPrimed = true;
+      try {
+        var silence = ctx.createBuffer(1, 1, ctx.sampleRate);
+        var blip = ctx.createBufferSource();
+        blip.buffer = silence;
+        blip.connect(master);
+        blip.start();
+      } catch (error) {}
+    }
+    if (ctx.state === "suspended") ctx.resume();
     startMic();
     syncScreenHold();
   }
@@ -1363,7 +1238,6 @@
       showView("tuner");
       syncTuner();
     }
-    wakeAudio();
   }
 
   function stringIndexAt(clientX, clientY) {
@@ -1641,26 +1515,18 @@
     });
 
     document.addEventListener("visibilitychange", function () {
+      if (ctx && master) {
+        var time = ctx.currentTime;
+        if (document.hidden) master.gain.setTargetAtTime(0.0001, time, 0.05);
+        else master.gain.setTargetAtTime(1, time, 0.08);
+      }
       if (document.hidden) {
-        duckMaster();
-        stopKeepAlive();
         if (micOn) haltMic(true);
-      } else {
-        holdSession();
-        resumeCtx();
-        restoreMaster();
-        if (ctx && ctx.state !== "running") {
-          ctx.resume().then(function () { if (!document.hidden) keepAlive(); }).catch(function () {});
-        } else {
-          keepAlive();
-        }
-        if (!micBlocked) startMic();
+      } else if (!micBlocked) {
+        startMic();
       }
       syncScreenHold();
     });
-    window.addEventListener("pageshow", wakeAudio);
-    window.addEventListener("focus", wakeAudio);
-    document.addEventListener("focusout", wakeAudio);
 
     window.addEventListener("hashchange", renderRoute);
     renderRoute();

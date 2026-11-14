@@ -333,8 +333,11 @@ h2 { font-size: 26px; }
 .string-col:nth-child(4) { --thick: 3.8px; }
 .string-col:nth-child(5) { --thick: 4.6px; }
 .string-col:nth-child(6) { --thick: 5.6px; }
+.string-col:nth-child(n + 3) .s-line {
+  background: linear-gradient(90deg, #8a5a18, #f0d48a 46%, #c4923a);
+}
 .string-col:nth-child(n + 4) .s-line {
-  background-image: repeating-linear-gradient(to bottom, #f7f4ee 0 2px, #c4beb2 2px 4px);
+  background-image: repeating-linear-gradient(to bottom, #f6e2a8 0 2px, #a67c2e 2px 4px);
 }
 .string-col.sounding .s-note { color: var(--brass-2); }
 .string-col.sounding .s-line {
@@ -431,6 +434,22 @@ h2 { font-size: 26px; }
   border-radius: 16px;
   background: rgba(224, 163, 74, 0.08);
 }
+.drag-handle {
+  flex: none;
+  width: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  touch-action: none;
+  cursor: grab;
+}
+.drag-handle, .drag-handle * { touch-action: none; }
+.drag-handle svg { width: 14px; height: 14px; display: block; }
+.tune-card.dragging .drag-handle { cursor: grabbing; }
 .tune-card.selected { border-color: rgba(224, 163, 74, 0.75); }
 .tune-open {
   flex: 1;

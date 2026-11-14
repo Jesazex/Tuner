@@ -864,6 +864,7 @@
   var libraryQuery = "";
   var libraryDrag = null;
   var libraryDragged = false;
+  var gripIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 5h2v2H9V5zm4 0h2v2h-2V5zM9 9h2v2H9V9zm4 0h2v2h-2V9zM9 13h2v2H9v-2zm4 0h2v2h-2v-2zM9 17h2v2H9v-2zm4 0h2v2h-2v-2z"/></svg>';
   var pencilIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
   var trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zM7 9h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM5 8h14l-1 13H6L5 8z"/></svg>';
 
@@ -890,6 +891,7 @@
       }).join("  ");
       var selected = tuning.id === state.activeId ? " selected" : "";
       return '<article class="tune-card' + selected + '" data-id="' + esc(tuning.id) + '">' +
+        '<button type="button" class="drag-handle" data-drag aria-label="Переместить строй">' + gripIcon + "</button>" +
         '<button type="button" class="tune-open" data-open="' + esc(tuning.id) + '" aria-label="Открыть строй ' + esc(tuning.name) + '">' +
         '<span class="tune-name">' + esc(tuning.name) + "</span>" +
         '<span class="tune-notes">' + notes + "</span>" +
@@ -990,8 +992,9 @@
     }
 
     list.addEventListener("pointerdown", function (event) {
-      if (event.target.closest(".icon-btn")) return;
-      var card = event.target.closest(".tune-card");
+      var handle = event.target.closest("[data-drag]");
+      if (!handle) return;
+      var card = handle.closest(".tune-card");
       if (!card) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       var rect = card.getBoundingClientRect();
@@ -1005,6 +1008,7 @@
         offsetY: event.clientY - rect.top,
         placeholder: null,
       };
+      try { handle.setPointerCapture(event.pointerId); } catch (error) {}
     });
     list.addEventListener("pointermove", function (event) {
       if (!libraryDrag || event.pointerId !== libraryDrag.pointer) return;

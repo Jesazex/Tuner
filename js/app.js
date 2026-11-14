@@ -864,7 +864,6 @@
   var libraryQuery = "";
   var libraryDrag = null;
   var libraryDragged = false;
-  var gripIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 5h2v2H9V5zm4 0h2v2h-2V5zM9 9h2v2H9V9zm4 0h2v2h-2V9zM9 13h2v2H9v-2zm4 0h2v2h-2v-2zM9 17h2v2H9v-2zm4 0h2v2h-2v-2z"/></svg>';
   var pencilIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
   var trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zM7 9h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9zM5 8h14l-1 13H6L5 8z"/></svg>';
 
@@ -891,7 +890,6 @@
       }).join("  ");
       var selected = tuning.id === state.activeId ? " selected" : "";
       return '<article class="tune-card' + selected + '" data-id="' + esc(tuning.id) + '">' +
-        '<button type="button" class="drag-handle" data-drag aria-label="Переместить строй">' + gripIcon + "</button>" +
         '<button type="button" class="tune-open" data-open="' + esc(tuning.id) + '" aria-label="Открыть строй ' + esc(tuning.name) + '">' +
         '<span class="tune-name">' + esc(tuning.name) + "</span>" +
         '<span class="tune-notes">' + notes + "</span>" +
@@ -926,47 +924,100 @@
   function bindLibraryDrag() {
     var list = document.getElementById("library-list");
 
+    function clearDragStyle(card) {
+      card.classList.remove("dragging");
+      card.style.position = "";
+      card.style.left = "";
+      card.style.top = "";
+      card.style.width = "";
+      card.style.margin = "";
+      card.style.zIndex = "";
+    }
+
     function finish(event) {
       if (!libraryDrag || event.pointerId !== libraryDrag.pointer) return;
-      libraryDrag.card.classList.remove("dragging");
-      if (libraryDrag.moved) {
+      var drag = libraryDrag;
+      libraryDrag = null;
+      if (drag.placeholder) {
+        drag.placeholder.parentNode.insertBefore(drag.card, drag.placeholder);
+        drag.placeholder.remove();
+      }
+      clearDragStyle(drag.card);
+      if (drag.moved) {
         libraryDragged = true;
         commitLibraryOrder();
       }
-      libraryDrag = null;
+    }
+
+    function lift(drag) {
+      var card = drag.card;
+      var rect = card.getBoundingClientRect();
+      var placeholder = document.createElement("div");
+      placeholder.className = "tune-placeholder";
+      placeholder.style.height = rect.height + "px";
+      card.parentNode.insertBefore(placeholder, card);
+      drag.placeholder = placeholder;
+      card.classList.add("dragging");
+      card.style.position = "fixed";
+      card.style.left = rect.left + "px";
+      card.style.width = rect.width + "px";
+      card.style.margin = "0";
+      card.style.zIndex = "5";
+      card.style.top = (drag.lastY - drag.offsetY) + "px";
+      drag.moved = true;
+      try { card.setPointerCapture(drag.pointer); } catch (error) {}
+    }
+
+    function placeSlot(drag, y) {
+      var placeholder = drag.placeholder;
+      var cards = [].filter.call(list.children, function (el) {
+        return el.classList.contains("tune-card") && el !== drag.card;
+      });
+      var target = null;
+      var i;
+      for (i = 0; i < cards.length; i++) {
+        var box = cards[i].getBoundingClientRect();
+        if (y < box.top + box.height / 2) {
+          target = cards[i];
+          break;
+        }
+      }
+      if (target) {
+        if (placeholder.nextElementSibling !== target) list.insertBefore(placeholder, target);
+      } else if (list.lastElementChild !== placeholder) {
+        list.appendChild(placeholder);
+      }
     }
 
     list.addEventListener("pointerdown", function (event) {
-      var handle = event.target.closest("[data-drag]");
-      if (!handle) return;
-      var card = handle.closest(".tune-card");
+      if (event.target.closest(".icon-btn")) return;
+      var card = event.target.closest(".tune-card");
       if (!card) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
-      libraryDrag = { card: card, pointer: event.pointerId, moved: false };
-      try { handle.setPointerCapture(event.pointerId); } catch (error) {}
+      var rect = card.getBoundingClientRect();
+      libraryDrag = {
+        card: card,
+        pointer: event.pointerId,
+        moved: false,
+        startX: event.clientX,
+        startY: event.clientY,
+        lastY: event.clientY,
+        offsetY: event.clientY - rect.top,
+        placeholder: null,
+      };
     });
     list.addEventListener("pointermove", function (event) {
       if (!libraryDrag || event.pointerId !== libraryDrag.pointer) return;
-      var card = libraryDrag.card;
-      var prev = card.previousElementSibling;
-      var next = card.nextElementSibling;
-      if (prev && prev.classList.contains("tune-card")) {
-        var prevBox = prev.getBoundingClientRect();
-        if (event.clientY < prevBox.top + prevBox.height / 2) {
-          list.insertBefore(card, prev);
-          libraryDrag.moved = true;
-        }
+      var drag = libraryDrag;
+      drag.lastY = event.clientY;
+      if (!drag.moved) {
+        if (Math.abs(event.clientY - drag.startY) < 8 && Math.abs(event.clientX - drag.startX) < 8) return;
+        lift(drag);
       }
-      if (next && next.classList.contains("tune-card")) {
-        var nextBox = next.getBoundingClientRect();
-        if (event.clientY > nextBox.top + nextBox.height / 2) {
-          list.insertBefore(next, card);
-          libraryDrag.moved = true;
-        }
-      }
-      if (libraryDrag.moved) card.classList.add("dragging");
+      drag.card.style.top = (event.clientY - drag.offsetY) + "px";
+      placeSlot(drag, event.clientY);
       if (event.cancelable) event.preventDefault();
-    });
+    }, { passive: false });
     list.addEventListener("pointerup", finish);
     list.addEventListener("pointercancel", finish);
   }

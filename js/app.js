@@ -348,6 +348,7 @@
       }
       analyser.connect(micSink);
       micOn = true;
+      if (ctx.state === "suspended") ctx.resume();
       paintLive();
       var buf = new Float32Array(analyser.fftSize);
       if (!audioWorker) {
@@ -389,7 +390,7 @@
     }).catch(function (error) {
       micStarting = false;
       var name = error && error.name;
-      if ((name === "NotAllowedError" || name === "PermissionDeniedError") && !audioPrimed) return;
+      if (!audioPrimed && (name === "NotAllowedError" || name === "PermissionDeniedError" || name === "SecurityError")) return;
       micBlocked = true;
       toast(name === "NotFoundError" ? "Микрофон не найден" : "Разрешите микрофон в настройках браузера");
     });
@@ -650,7 +651,7 @@
       tapeTarget = tapeShown;
       placeTape();
       markTape();
-      vx *= 0.92;
+      vx *= 0.75;
       var stopped = Math.abs(vx) < 0.03 || tapeShown === TAPE_MIN || tapeShown === TAPE_MAX;
       if (stopped) {
         tapeCoast = 0;
@@ -862,7 +863,7 @@
 
   var libraryQuery = "";
   var pencilIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
-  var trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12l1-13H5l1 13z"/></svg>';
+  var trashIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M9 3h6v2h5v2H4V5h5V3zM7 9h10l-1 11H8L7 9zM8 11h2v6H8v-6zM11 11h2v6h-2v-6zM14 11h2v6h-2v-6z"/></svg>';
 
   function renderLibrary() {
     var root = document.getElementById("library-list");
@@ -1379,7 +1380,7 @@
       }
       if (document.hidden) {
         if (micOn) haltMic(true);
-      } else if (!micBlocked && audioPrimed) {
+      } else if (!micBlocked) {
         startMic();
       }
       syncScreenHold();
@@ -1387,9 +1388,7 @@
 
     window.addEventListener("hashchange", renderRoute);
     renderRoute();
-    var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    if (!ios) startMic();
+    startMic();
   }
 
   init();

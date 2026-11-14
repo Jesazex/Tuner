@@ -200,9 +200,9 @@ h2 { font-size: 26px; }
   width: 0;
   height: 0;
   transform: translateX(-50%);
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 8px solid var(--ivory);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 13px solid var(--ivory);
   background: none;
   z-index: 4;
   pointer-events: none;
@@ -333,9 +333,6 @@ h2 { font-size: 26px; }
 .string-col:nth-child(4) { --thick: 3.8px; }
 .string-col:nth-child(5) { --thick: 4.6px; }
 .string-col:nth-child(6) { --thick: 5.6px; }
-.string-col:nth-child(n + 3) .s-line {
-  background: linear-gradient(90deg, #8a5a18, #f0d48a 46%, #c4923a);
-}
 .string-col:nth-child(n + 4) .s-line {
   background-image: repeating-linear-gradient(to bottom, #f6e2a8 0 2px, #a67c2e 2px 4px);
 }

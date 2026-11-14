@@ -970,8 +970,10 @@
       try { card.setPointerCapture(drag.pointer); } catch (error) {}
     }
 
-    function placeSlot(drag, y) {
+    function placeSlot(drag) {
       var placeholder = drag.placeholder;
+      var cardBox = drag.card.getBoundingClientRect();
+      var mid = cardBox.top + cardBox.height / 2;
       var cards = [].filter.call(list.children, function (el) {
         return el.classList.contains("tune-card") && el !== drag.card;
       });
@@ -979,7 +981,7 @@
       var i;
       for (i = 0; i < cards.length; i++) {
         var box = cards[i].getBoundingClientRect();
-        if (y < box.top + box.height / 2) {
+        if (mid < box.top + box.height / 2) {
           target = cards[i];
           break;
         }
@@ -1019,7 +1021,7 @@
         lift(drag);
       }
       drag.card.style.top = (event.clientY - drag.offsetY) + "px";
-      placeSlot(drag, event.clientY);
+      placeSlot(drag);
       if (event.cancelable) event.preventDefault();
     }, { passive: false });
     list.addEventListener("pointerup", finish);

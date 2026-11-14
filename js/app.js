@@ -52,6 +52,12 @@
     });
   }
 
+  function noteHtml(midi) {
+    var name = Music.midiToName(midi);
+    var letter = name.replace(/\d+$/, "");
+    return esc(letter) + "<sub>" + name.slice(letter.length) + "</sub>";
+  }
+
   function clonePreset(preset) {
     return {
       id: preset.id,
@@ -426,7 +432,8 @@
     var dir = document.getElementById("readout-dir");
     var hz = document.getElementById("readout-hz");
     var needle = document.getElementById("needle");
-    if (!live) {
+    var sounding = pluckedMidi != null && performance.now() < pluckUntil;
+    if (!live && !sounding) {
       note.textContent = "";
       note.className = "readout-note";
       dir.textContent = "";
@@ -436,7 +443,18 @@
       hz.textContent = state.showHz ? "нет звука" : "";
       return;
     }
-    note.textContent = Music.midiToName(live.target);
+    if (!live) {
+      note.innerHTML = noteHtml(pluckedMidi);
+      note.className = "readout-note";
+      dir.textContent = "";
+      dir.className = "";
+      delete dir.dataset.key;
+      needle.hidden = true;
+      hz.hidden = !state.showHz;
+      hz.textContent = state.showHz ? formatHz(Music.frequency(pluckedMidi)) : "";
+      return;
+    }
+    note.innerHTML = noteHtml(live.target);
     note.className = "readout-note dir-" + live.direction;
     var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять" : "Опустить";
     var key = live.index + ":" + live.direction;
@@ -472,9 +490,14 @@
       row.classList.toggle("on", on);
       if (on) current = row;
     });
+    var freq = soundingFrequency();
+    document.querySelectorAll(".nhz").forEach(function (el) { el.textContent = ""; });
     if (!current) {
       lastScrolled = null;
       return;
+    }
+    if (state.showHz && freq && current.querySelector(".nhz")) {
+      current.querySelector(".nhz").textContent = formatHz(freq);
     }
     if (String(midi) === lastScrolled) return;
     var list = document.getElementById("note-list");
@@ -510,14 +533,14 @@
       var cls = delta > 0 ? "plus" : delta < 0 ? "minus" : "zero";
       return '<div class="string-col" data-index="' + index + '">' +
         '<div class="s-meta">' +
-        '<span class="s-note">' + Music.midiToName(midi) + "</span>" +
+        '<span class="s-note">' + noteHtml(midi) + "</span>" +
         '<span class="s-off ' + cls + '">' + Music.formatOffset(delta) + "</span></div>" +
         '<div class="s-line-wrap"><div class="s-hit"></div><div class="s-line"></div></div></div>';
     }).join("");
   }
 
   function stringLabel(index) {
-    return (index + 1) + "-я струна";
+    return ["Первая струна", "Вторая струна", "Третья струна", "Четвёртая струна", "Пятая струна", "Шестая струна"][index];
   }
 
   function withinStandard(midi, index) {
@@ -574,7 +597,7 @@
       return;
     }
     root.innerHTML = state.tunings.map(function (tuning) {
-      var notes = tuning.notes.map(Music.midiToName).join("  ");
+      var notes = tuning.notes.map(noteHtml).join("  ");
       var offsets = tuning.notes.map(function (midi, index) {
         return Music.formatOffset(offsetAt(midi, index));
       }).join("  ");
@@ -597,7 +620,7 @@
     var html = "";
     var midi;
     for (midi = base - FRET_LIMIT; midi <= base + FRET_LIMIT; midi++) {
-      html += '<button type="button" class="key" data-midi="' + midi + '">' + Music.midiToName(midi) + "</button>";
+      html += '<button type="button" class="key" data-midi="' + midi + '">' + noteHtml(midi) + "</button>";
     }
     return '<div class="scale"><div class="scale-row">' + html + "</div></div>";
   }
@@ -606,7 +629,7 @@
     var card = document.getElementById("string-card-" + index);
     var midi = draft.notes[index];
     var delta = offsetAt(midi, index);
-    card.querySelector(".big-note").textContent = Music.midiToName(midi);
+    card.querySelector(".big-note").innerHTML = noteHtml(midi);
     var off = card.querySelector(".off");
     off.textContent = Music.formatOffset(delta);
     off.className = "off " + (delta > 0 ? "plus" : delta < 0 ? "minus" : "zero");
@@ -616,10 +639,21 @@
       button.classList.toggle("selected", on);
       if (on) selected = button;
     });
-    if (selected) {
-      var scale = card.querySelector(".scale");
-      scale.scrollLeft = selected.offsetLeft - scale.clientWidth / 2 + selected.clientWidth / 2;
-    }
+    centerScale(card.querySelector(".scale"));
+  }
+
+  function centerScale(scale) {
+    if (!scale || !scale.clientWidth) return;
+    var selected = scale.querySelector(".key.selected");
+    if (!selected) return;
+    var scaleRect = scale.getBoundingClientRect();
+    var keyRect = selected.getBoundingClientRect();
+    var delta = keyRect.left + keyRect.width / 2 - (scaleRect.left + scaleRect.width / 2);
+    if (Math.abs(delta) > 1) scale.scrollLeft += delta;
+  }
+
+  function centerScales() {
+    document.querySelectorAll("#editor-body .scale").forEach(centerScale);
   }
 
   function paintEditorTitle() {
@@ -726,6 +760,7 @@
     }
     renderEditor();
     showView("editor");
+    requestAnimationFrame(function () { requestAnimationFrame(centerScales); });
   }
 
   function closeNotes() {
@@ -746,10 +781,11 @@
     toggle.setAttribute("aria-pressed", state.showHz ? "true" : "false");
     document.getElementById("fret-down").disabled = !canShift(-1);
     document.getElementById("fret-up").disabled = !canShift(1);
-    document.getElementById("reference-list").innerHTML = state.tunings.map(function (tuning) {
-      var on = tuning.id === state.referenceId;
-      return '<button type="button" class="ref-btn' + (on ? " on" : "") + '" data-ref="' + esc(tuning.id) + '" aria-pressed="' + (on ? "true" : "false") + '">' + esc(tuning.name) + "</button>";
+    var select = document.getElementById("reference-select");
+    select.innerHTML = state.tunings.map(function (tuning) {
+      return '<option value="' + esc(tuning.id) + '">' + esc(tuning.name) + "</option>";
     }).join("");
+    if (state.referenceId) select.value = state.referenceId;
   }
 
   function renderRoute() {
@@ -798,7 +834,7 @@
     document.getElementById("note-list").innerHTML = Music.catalog().map(function (midi) {
       var cls = Music.pitchClass(midi) === 0 ? "note-row octave-start" : "note-row";
       return '<div class="' + cls + '" data-midi="' + midi + '" role="listitem">' +
-        '<span class="nn">' + Music.midiToName(midi) + '</span><span class="ntag"></span></div>';
+        '<span class="nn">' + noteHtml(midi) + '</span><span class="note-meta"><span class="ntag"></span><span class="nhz"></span></span></div>';
     }).join("");
   }
 
@@ -816,13 +852,11 @@
       persist();
       renderSettings();
       paintReadout();
+      paintNoteHighlight();
     });
-    document.getElementById("reference-list").addEventListener("click", function (event) {
-      var button = event.target.closest("[data-ref]");
-      if (!button) return;
-      state.referenceId = button.dataset.ref;
+    document.getElementById("reference-select").addEventListener("change", function (event) {
+      state.referenceId = event.target.value || null;
       persist();
-      renderSettings();
       if (active()) renderBoard();
       paintLive();
     });
@@ -846,7 +880,45 @@
       event.target.classList.remove("invalid");
       paintEditorTitle();
     });
-    document.getElementById("editor-body").addEventListener("click", function (event) {
+    var editorBody = document.getElementById("editor-body");
+    var scaleGesture = null;
+    editorBody.addEventListener("touchstart", function (event) {
+      var scale = event.target.closest(".scale");
+      if (!scale) {
+        scaleGesture = null;
+        return;
+      }
+      var touch = event.changedTouches[0];
+      scaleGesture = { scale: scale, x: touch.clientX, y: touch.clientY, left: scale.scrollLeft, axis: null };
+    }, { passive: true });
+    editorBody.addEventListener("touchmove", function (event) {
+      if (!scaleGesture) return;
+      var touch = event.touches[0];
+      var dx = touch.clientX - scaleGesture.x;
+      var dy = touch.clientY - scaleGesture.y;
+      if (!scaleGesture.axis) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        scaleGesture.axis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
+      }
+      if (scaleGesture.axis !== "x") return;
+      scaleGesture.scale.scrollLeft = scaleGesture.left - dx;
+      if (event.cancelable) event.preventDefault();
+    }, { passive: false });
+    editorBody.addEventListener("touchend", function () { scaleGesture = null; });
+    editorBody.addEventListener("touchcancel", function () { scaleGesture = null; });
+    editorBody.addEventListener("wheel", function (event) {
+      var scale = event.target.closest(".scale");
+      if (!scale) return;
+      var delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (!delta) return;
+      var max = scale.scrollWidth - scale.clientWidth;
+      if (max <= 0) return;
+      var next = Math.max(0, Math.min(max, scale.scrollLeft + delta));
+      if (next === scale.scrollLeft) return;
+      scale.scrollLeft = next;
+      event.preventDefault();
+    }, { passive: false });
+    editorBody.addEventListener("click", function (event) {
       var card = event.target.closest(".string-card");
       var key = event.target.closest("[data-midi]");
       if (!card || !key || !draft) return;

@@ -7,11 +7,18 @@
   <meta name="description" content="Гитарный тюнер: свои строи, шесть струн и распознавание ноты в браузере.">
   <title>Tuner — гитарный тюнер</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/styles.css?v=6">
+  <link rel="stylesheet" href="css/styles.css?v=8">
 </head>
 <body>
   <div class="app">
     <main id="view-tuner" class="view">
+      <div class="name-row">
+        <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт</button>
+        <div class="pair">
+          <button type="button" class="chip" id="fret-down">− лад</button>
+          <button type="button" class="chip" id="fret-up">+ лад</button>
+        </div>
+      </div>
       <button type="button" id="readout" class="readout" aria-label="Ноты и шкала. Нажмите, чтобы открыть список нот.">
         <span id="readout-note" class="readout-note"></span>
         <span id="meter" class="meter">
@@ -27,9 +34,6 @@
           <span id="readout-hz" hidden></span>
         </span>
       </button>
-      <div class="name-row">
-        <button type="button" id="tuning-name" class="tuning-name">Строй: Стандарт</button>
-      </div>
       <div id="empty-state" class="empty-state" hidden>
         <p>Нет сохранённого строя</p>
         <button type="button" id="empty-create">Новый строй</button>
@@ -40,11 +44,8 @@
     </main>
 
     <main id="view-library" class="view" hidden>
-      <header class="bar">
-        <h2>Строи</h2>
-        <button type="button" class="save" id="new-tuning">Новый</button>
-      </header>
       <div id="library-list"></div>
+      <button type="button" class="fab" id="new-tuning" aria-label="Новый строй">+</button>
     </main>
 
     <main id="view-settings" class="view" hidden>
@@ -53,13 +54,8 @@
       </header>
       <div class="settings-body">
         <button type="button" class="set-row" id="hz-toggle" aria-pressed="false">Показывать частоту</button>
-        <p class="hint">Сдвинуть выбранный строй</p>
-        <div class="pair settings-pair">
-          <button type="button" class="chip" id="fret-down">− лад</button>
-          <button type="button" class="chip" id="fret-up">+ лад</button>
-        </div>
-        <p class="hint">Расчет относительно строя</p>
-        <div id="reference-list" class="ref-list"></div>
+        <label class="hint" for="reference-select">Расчет относительно строя</label>
+        <select id="reference-select" class="field"></select>
       </div>
     </main>
 
@@ -109,9 +105,9 @@
   <div id="toast" class="toast" hidden></div>
   <p id="live-region" class="sr-only" aria-live="polite"></p>
 
-  <script src="js/music.js?v=6"></script>
-  <script src="js/pitch-core.js?v=6"></script>
-  <script src="js/synth-core.js?v=6"></script>
-  <script src="js/app.js?v=6"></script>
+  <script src="js/music.js?v=8"></script>
+  <script src="js/pitch-core.js?v=8"></script>
+  <script src="js/synth-core.js?v=8"></script>
+  <script src="js/app.js?v=8"></script>
 </body>
 </html>

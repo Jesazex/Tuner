@@ -3,11 +3,23 @@
     var n = samples.length;
     if (n < 512 || !(sampleRate > 0)) return null;
 
-    var energy = 0;
+    var peak = 0;
     var i;
+    for (i = 0; i < n; i++) {
+      var abs = samples[i] < 0 ? -samples[i] : samples[i];
+      if (abs > peak) peak = abs;
+    }
+    if (peak < 0.0002) return null;
+    if (peak < 0.3) {
+      var boost = 0.3 / peak;
+      if (boost > 24) boost = 24;
+      for (i = 0; i < n; i++) samples[i] *= boost;
+    }
+
+    var energy = 0;
     for (i = 0; i < n; i++) energy += samples[i] * samples[i];
     var rms = Math.sqrt(energy / n);
-    if (rms < 0.005) return null;
+    if (rms < 0.002) return null;
 
     var minFreq = 50;
     var maxFreq = 1000;
@@ -41,7 +53,7 @@
       cmnd[tau] = running > 0 ? (diff[tau] * tau) / running : 1;
     }
 
-    var threshold = 0.15;
+    var threshold = 0.28;
     tau = tauMin;
     while (tau < tauMax) {
       if (cmnd[tau] < threshold) {

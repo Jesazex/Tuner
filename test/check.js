@@ -60,6 +60,10 @@ for (const freq of [82.41, 110, 196, 329.63]) {
   assert(detected && Math.abs(error) < 8, "sine " + freq);
 }
 
+const quiet = detectPitch(sine(110, sampleRate, 4096, 0.001), sampleRate);
+assert(quiet && Math.abs(cents(quiet, 110)) < 8, "quiet sine " + quiet);
+assert(detectPitch(sine(110, sampleRate, 4096, 0.00005), sampleRate) == null, "below gate");
+
 for (const freq of [82.41, 110, 196, 246.94, 329.63]) {
   const rendered = renderPluckSamples(freq, sampleRate);
   const start = Math.floor(sampleRate * 0.12);

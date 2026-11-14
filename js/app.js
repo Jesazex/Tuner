@@ -74,6 +74,7 @@
       activeId: "standard",
       showHz: false,
       referenceId: "standard",
+      fretShift: 0,
     };
   }
 
@@ -98,10 +99,10 @@
       if (!raw) return defaultState();
       var data = JSON.parse(raw);
       var tunings = Array.isArray(data.tunings) ? data.tunings.map(sanitize).filter(Boolean) : [];
-      if (!tunings.length) return { tunings: [], activeId: null, showHz: !!data.showHz, referenceId: null };
+      if (!tunings.length) return { tunings: [], activeId: null, showHz: !!data.showHz, referenceId: null, fretShift: readShift(data.fretShift) };
       var activeId = tunings.some(function (t) { return t.id === data.activeId; }) ? data.activeId : tunings[0].id;
       var referenceId = tunings.some(function (t) { return t.id === data.referenceId; }) ? data.referenceId : "standard";
-      return { tunings: tunings, activeId: activeId, showHz: !!data.showHz, referenceId: referenceId };
+      return { tunings: tunings, activeId: activeId, showHz: !!data.showHz, referenceId: referenceId, fretShift: readShift(data.fretShift) };
     } catch (error) {
       return defaultState();
     }
@@ -114,6 +115,7 @@
         activeId: state.activeId,
         showHz: state.showHz,
         referenceId: state.referenceId,
+        fretShift: state.fretShift || 0,
       }));
     } catch (error) {}
   }
@@ -134,8 +136,21 @@
     return Music.STANDARD;
   }
 
+  function readShift(value) {
+    var shift = Number(value);
+    if (!Number.isInteger(shift)) return 0;
+    if (shift > FRET_LIMIT) return FRET_LIMIT;
+    if (shift < -FRET_LIMIT) return -FRET_LIMIT;
+    return shift;
+  }
+
   function offsetAt(midi, index) {
     return midi - referenceNotes()[index];
+  }
+
+  function screenNotes(tuning) {
+    var shift = state.fretShift || 0;
+    return tuning.notes.map(function (midi) { return midi + shift; });
   }
 
   function holdSession() {
@@ -207,7 +222,7 @@
   function pluck(index) {
     var tuning = active();
     if (!tuning || index < 0 || index > 5) return;
-    var midi = tuning.notes[index];
+    var midi = tuning.notes[index] + (state.fretShift || 0);
     var audio = ensureCtx();
     var i;
     for (i = 0; i < playing.length; i++) {
@@ -372,9 +387,10 @@
   function applyStable(freq) {
     var tuning = active();
     if (!tuning) return;
-    var index = Music.closestString(freq, tuning.notes, lastString);
+    var notes = screenNotes(tuning);
+    var index = Music.closestString(freq, notes, lastString);
     lastString = index;
-    var target = tuning.notes[index];
+    var target = notes[index];
     var cents = Music.centsBetween(freq, Music.frequency(target));
     var absCents = Math.abs(cents);
     inTuneHold = inTuneHold ? absCents < 9 : absCents < 6;
@@ -394,7 +410,7 @@
     var now = performance.now();
     if (freq == null) {
       if (!silenceSince) silenceSince = now;
-      if (now - silenceSince > 320) {
+      if (now - silenceSince > 520) {
         live = null;
         hist = [];
         lastString = null;
@@ -428,34 +444,34 @@
   }
 
   function paintReadout() {
-    var note = document.getElementById("readout-note");
     var dir = document.getElementById("readout-dir");
     var hz = document.getElementById("readout-hz");
     var needle = document.getElementById("needle");
     var sounding = pluckedMidi != null && performance.now() < pluckUntil;
+    function showHz(freq) {
+      if (state.showHz && freq) {
+        hz.hidden = false;
+        hz.textContent = formatHz(freq);
+      } else {
+        hz.hidden = true;
+        hz.textContent = "";
+      }
+    }
     if (!live && !sounding) {
-      note.textContent = "";
-      note.className = "readout-note";
       dir.textContent = "";
       dir.className = "";
       needle.hidden = true;
-      hz.hidden = !state.showHz;
-      hz.textContent = state.showHz ? "нет звука" : "";
+      showHz(null);
       return;
     }
     if (!live) {
-      note.innerHTML = noteHtml(pluckedMidi);
-      note.className = "readout-note";
       dir.textContent = "";
       dir.className = "";
       delete dir.dataset.key;
       needle.hidden = true;
-      hz.hidden = !state.showHz;
-      hz.textContent = state.showHz ? formatHz(Music.frequency(pluckedMidi)) : "";
+      showHz(Music.frequency(pluckedMidi));
       return;
     }
-    note.innerHTML = noteHtml(live.target);
-    note.className = "readout-note dir-" + live.direction;
     var phrase = live.direction === "ok" ? "В строе" : live.direction === "up" ? "Поднять" : "Опустить";
     var key = live.index + ":" + live.direction;
     if (dir.dataset.key !== key) {
@@ -468,13 +484,12 @@
     var clamped = Math.max(-50, Math.min(50, live.cents));
     needle.style.left = (50 + clamped) + "%";
     needle.className = "needle dir-" + live.direction;
-    hz.hidden = !state.showHz;
-    hz.textContent = state.showHz ? formatHz(live.freq) : "";
+    showHz(live.freq);
   }
 
   function paintNoteTags() {
     var tuning = active();
-    var used = new Set(tuning ? tuning.notes : []);
+    var used = new Set(tuning ? screenNotes(tuning) : []);
     document.querySelectorAll(".note-row").forEach(function (row) {
       row.querySelector(".ntag").textContent = used.has(Number(row.dataset.midi)) ? "в строе" : "";
     });
@@ -528,7 +543,7 @@
       root.innerHTML = "";
       return;
     }
-    root.innerHTML = tuning.notes.map(function (midi, index) {
+    root.innerHTML = screenNotes(tuning).map(function (midi, index) {
       var delta = offsetAt(midi, index);
       var cls = delta > 0 ? "plus" : delta < 0 ? "minus" : "zero";
       return '<div class="string-col" data-index="' + index + '">' +
@@ -548,15 +563,27 @@
     return midi >= base - FRET_LIMIT && midi <= base + FRET_LIMIT;
   }
 
-  function canShift(step) {
+  function shiftFits(shift) {
     var tuning = active();
     if (!tuning) return false;
     return tuning.notes.every(function (midi, index) {
-      return withinStandard(midi + step, index);
+      return withinStandard(midi + shift, index);
     });
   }
 
+  function clampFretShift() {
+    if (!state.fretShift) state.fretShift = 0;
+    while (state.fretShift !== 0 && !shiftFits(state.fretShift)) {
+      state.fretShift += state.fretShift > 0 ? -1 : 1;
+    }
+  }
+
+  function canShift(step) {
+    return shiftFits((state.fretShift || 0) + step);
+  }
+
   function syncTuner() {
+    clampFretShift();
     var tuning = active();
     document.getElementById("tuning-name").textContent = tuning ? "Строй: " + tuning.name : "Строй: нет";
     document.getElementById("empty-state").hidden = !!tuning;
@@ -569,9 +596,8 @@
   }
 
   function transpose(step) {
-    var tuning = active();
-    if (!tuning || !canShift(step)) return;
-    tuning.notes = tuning.notes.map(function (midi) { return midi + step; });
+    if (!active() || !canShift(step)) return;
+    state.fretShift = (state.fretShift || 0) + step;
     persist();
     bufferCache.clear();
     var stable = hist.length ? hist.slice().sort(function (a, b) { return a - b; })[hist.length >> 1] : null;
@@ -882,14 +908,30 @@
     });
     var editorBody = document.getElementById("editor-body");
     var scaleGesture = null;
+    var momentumFrame = 0;
+    function stopMomentum() {
+      if (momentumFrame) clearTimeout(momentumFrame);
+      momentumFrame = 0;
+    }
     editorBody.addEventListener("touchstart", function (event) {
       var scale = event.target.closest(".scale");
+      stopMomentum();
       if (!scale) {
         scaleGesture = null;
         return;
       }
       var touch = event.changedTouches[0];
-      scaleGesture = { scale: scale, x: touch.clientX, y: touch.clientY, left: scale.scrollLeft, axis: null };
+      scaleGesture = {
+        scale: scale,
+        x: touch.clientX,
+        y: touch.clientY,
+        left: scale.scrollLeft,
+        axis: null,
+        lastX: touch.clientX,
+        lastT: performance.now(),
+        startT: performance.now(),
+        vx: 0,
+      };
     }, { passive: true });
     editorBody.addEventListener("touchmove", function (event) {
       if (!scaleGesture) return;
@@ -897,15 +939,57 @@
       var dx = touch.clientX - scaleGesture.x;
       var dy = touch.clientY - scaleGesture.y;
       if (!scaleGesture.axis) {
-        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
         scaleGesture.axis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
       }
       if (scaleGesture.axis !== "x") return;
+      var now = performance.now();
+      var dt = now - scaleGesture.lastT;
+      if (dt > 0 && dt < 80) {
+        var instant = (scaleGesture.lastX - touch.clientX) / dt;
+        scaleGesture.vx = scaleGesture.vx * 0.45 + instant * 0.55;
+      }
+      scaleGesture.lastX = touch.clientX;
+      scaleGesture.lastT = now;
       scaleGesture.scale.scrollLeft = scaleGesture.left - dx;
       if (event.cancelable) event.preventDefault();
     }, { passive: false });
-    editorBody.addEventListener("touchend", function () { scaleGesture = null; });
-    editorBody.addEventListener("touchcancel", function () { scaleGesture = null; });
+    editorBody.addEventListener("touchend", function () {
+      var gesture = scaleGesture;
+      scaleGesture = null;
+      if (!gesture || gesture.axis !== "x" || performance.now() - gesture.lastT > 70) return;
+      var scale = gesture.scale;
+      var velocity = gesture.vx;
+      if (Math.abs(velocity) < 0.04) {
+        var elapsed = Math.max(16, gesture.lastT - gesture.startT);
+        velocity = (gesture.x - gesture.lastX) / elapsed;
+      }
+      if (Math.abs(velocity) < 0.04) return;
+      var last = performance.now();
+      function frame(now) {
+        var dt = Math.min(34, now - last);
+        last = now;
+        velocity *= Math.pow(0.92, dt / 16);
+        if (Math.abs(velocity) < 0.02) {
+          momentumFrame = 0;
+          return;
+        }
+        var max = Math.max(0, scale.scrollWidth - scale.clientWidth);
+        var next = scale.scrollLeft + velocity * dt;
+        if (next <= 0 || next >= max) {
+          scale.scrollLeft = Math.max(0, Math.min(max, next));
+          momentumFrame = 0;
+          return;
+        }
+        scale.scrollLeft = next;
+        momentumFrame = setTimeout(function () { frame(performance.now()); }, 16);
+      }
+      momentumFrame = setTimeout(function () { frame(performance.now()); }, 16);
+    });
+    editorBody.addEventListener("touchcancel", function () {
+      scaleGesture = null;
+      stopMomentum();
+    });
     editorBody.addEventListener("wheel", function (event) {
       var scale = event.target.closest(".scale");
       if (!scale) return;

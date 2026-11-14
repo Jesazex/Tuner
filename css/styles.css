@@ -94,18 +94,6 @@ h2 { font-size: 26px; }
   background: transparent;
   text-align: left;
 }
-.readout-note {
-  flex: none;
-  width: 72px;
-  min-height: 1em;
-  font-family: var(--serif);
-  font-size: 28px;
-  line-height: 1;
-  font-variant-numeric: lining-nums;
-}
-.readout-note.dir-ok { color: var(--ok); }
-.readout-note.dir-up { color: var(--up); }
-.readout-note.dir-down { color: var(--down); }
 .readout-side {
   flex: none;
   width: 76px;
@@ -446,17 +434,20 @@ select.field {
 }
 .string-card header {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
-  gap: 8px 12px;
+  gap: 10px;
 }
 .string-card .label {
-  flex: 1 0 100%;
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--ivory);
   font-family: var(--serif);
   font-size: 24px;
   letter-spacing: -0.02em;
 }
+.string-card .big-note,
+.string-card .off { flex: none; }
 .big-note {
   font-family: var(--serif);
   font-size: 28px;
@@ -489,26 +480,26 @@ select.field {
   scrollbar-width: none;
   -ms-overflow-style: none;
   overscroll-behavior-x: contain;
-  touch-action: manipulation;
+  touch-action: none;
 }
-.scale, .scale * { touch-action: manipulation; }
+.scale, .scale * { touch-action: none; }
 .scale::-webkit-scrollbar { display: none; }
 .scale-row {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   width: max-content;
 }
 .key {
   flex: none;
-  width: 46px;
+  width: 28px;
   height: 36px;
-  padding: 0 2px;
+  padding: 0;
   border: 1px solid rgba(244, 238, 230, 0.28);
   background: transparent;
   color: var(--ivory);
   user-select: none;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 11px;
   line-height: 1;
 }
 .key.selected {
@@ -670,7 +661,6 @@ select.field {
 }
 
 @media (max-height: 700px) {
-  .readout-note { font-size: 24px; }
   .s-meta { padding: 6px 0; }
 }
 

@@ -1277,9 +1277,69 @@
     pluck(index);
   }
 
+  function textField(el) {
+    return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+  }
+
+  function closeField(el) {
+    if (!textField(el) || document.activeElement !== el) return;
+    var value = el.value;
+    el.readOnly = true;
+    el.blur();
+    function restore() {
+      if (el.value === value) return;
+      el.value = value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    restore();
+    setTimeout(function () {
+      el.readOnly = false;
+      restore();
+    }, 50);
+    setTimeout(restore, 200);
+  }
+
+  function bindScrollDismiss() {
+    var drag = null;
+    document.addEventListener("touchstart", function (event) {
+      var field = document.activeElement;
+      if (!textField(field)) {
+        drag = null;
+        return;
+      }
+      var touch = event.changedTouches[0];
+      drag = {
+        x: touch.clientX,
+        y: touch.clientY,
+        field: field,
+        onField: event.target === field || field.contains(event.target),
+      };
+    }, { capture: true, passive: true });
+    document.addEventListener("touchmove", function (event) {
+      if (!drag || drag.onField) return;
+      var touch = event.touches[0];
+      if (Math.abs(touch.clientX - drag.x) < 12 && Math.abs(touch.clientY - drag.y) < 12) return;
+      var field = drag.field;
+      drag = null;
+      closeField(field);
+    }, { capture: true, passive: true });
+    document.addEventListener("touchend", function () { drag = null; }, { capture: true, passive: true });
+    document.addEventListener("touchcancel", function () { drag = null; }, { capture: true, passive: true });
+    document.addEventListener("wheel", function (event) {
+      var field = document.activeElement;
+      if (!textField(field)) return;
+      if (event.target === field || field.contains(event.target)) return;
+      closeField(field);
+    }, { capture: true, passive: true });
+    document.addEventListener("focusin", function (event) {
+      if (textField(event.target)) event.target.readOnly = false;
+    });
+  }
+
   function init() {
     buildTape();
     bindTape();
+    bindScrollDismiss();
     document.getElementById("tuning-search").addEventListener("input", function (event) {
       libraryQuery = event.target.value;
       renderLibrary();

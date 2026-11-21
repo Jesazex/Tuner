@@ -152,6 +152,10 @@
     return midi - referenceNotes()[index];
   }
 
+  function standardOffsetAt(midi, index) {
+    return midi - Music.STANDARD[index];
+  }
+
   function screenNotes(tuning) {
     var shift = state.fretShift || 0;
     return tuning.notes.map(function (midi) { return midi + shift; });
@@ -803,6 +807,13 @@
     return ["Первая струна", "Вторая струна", "Третья струна", "Четвёртая струна", "Пятая струна", "Шестая струна"][index];
   }
 
+  function highToLow(count) {
+    var indexes = [];
+    var index;
+    for (index = count - 1; index >= 0; index--) indexes.push(index);
+    return indexes;
+  }
+
   function withinStandard(midi, index) {
     var base = Music.STANDARD[index];
     return midi >= base - FRET_LIMIT && midi <= base + FRET_LIMIT;
@@ -885,9 +896,10 @@
       return;
     }
     root.innerHTML = list.map(function (tuning) {
-      var notes = tuning.notes.map(noteHtml).join(" ");
-      var offsets = tuning.notes.map(function (midi, index) {
-        return Music.formatOffset(offsetAt(midi, index));
+      var order = highToLow(tuning.notes.length);
+      var notes = order.map(function (index) { return noteHtml(tuning.notes[index]); }).join(" ");
+      var offsets = order.map(function (index) {
+        return Music.formatOffset(offsetAt(tuning.notes[index], index));
       }).join("  ");
       var selected = tuning.id === state.activeId ? " selected" : "";
       return '<article class="tune-card' + selected + '" data-id="' + esc(tuning.id) + '">' +
@@ -1049,7 +1061,7 @@
   function refreshString(index) {
     var card = document.getElementById("string-card-" + index);
     var midi = draft.notes[index];
-    var delta = offsetAt(midi, index);
+    var delta = standardOffsetAt(midi, index);
     card.querySelector(".big-note").innerHTML = noteHtml(midi);
     var off = card.querySelector(".off");
     off.textContent = Music.formatOffset(delta);
@@ -1083,7 +1095,7 @@
     document.getElementById("editor-name").classList.remove("invalid");
     document.getElementById("editor-desc").value = draft.description || "";
     paintEditorTitle();
-    document.getElementById("editor-body").innerHTML = draft.notes.map(function (midi, index) {
+    document.getElementById("editor-body").innerHTML = highToLow(draft.notes.length).map(function (index) {
       return '<article class="string-card" id="string-card-' + index + '" data-index="' + index + '">' +
         '<header><span class="label">' + stringLabel(index) + '</span>' +
         '<strong class="big-note"></strong><span class="off"></span></header>' +
